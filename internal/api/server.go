@@ -8,8 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var snapshots []models.Snapshot
-
 func StartServer() {
 	r := gin.Default()
 
@@ -20,7 +18,7 @@ func StartServer() {
 	})
 
 	r.GET("/snapshots", func(c *gin.Context) {
-		c.JSON(http.StatusOK, snapshots)
+		c.JSON(http.StatusOK, Snapshots)
 	})
 
 	r.POST("/snapshot", func(c *gin.Context) {
@@ -34,7 +32,7 @@ func StartServer() {
 			return
 		}
 
-		snapshots = append(snapshots, snapshot)
+		AddSnapshot(snapshot)
 
 		c.JSON(http.StatusCreated, snapshot)
 	})
