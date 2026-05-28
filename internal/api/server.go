@@ -8,6 +8,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var snapshots []models.Snapshot
+
 func StartServer() {
 	r := gin.Default()
 
@@ -18,19 +20,23 @@ func StartServer() {
 	})
 
 	r.GET("/snapshots", func(c *gin.Context) {
+		c.JSON(http.StatusOK, snapshots)
+	})
 
-		snapshots := []models.Snapshot{
-			{
-				ID:   1,
-				File: "notes.txt",
-			},
-			{
-				ID:   2,
-				File: "todo.txt",
-			},
+	r.POST("/snapshot", func(c *gin.Context) {
+
+		var snapshot models.Snapshot
+
+		if err := c.BindJSON(&snapshot); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
 		}
 
-		c.JSON(http.StatusOK, snapshots)
+		snapshots = append(snapshots, snapshot)
+
+		c.JSON(http.StatusCreated, snapshot)
 	})
 
 	r.Run(":8080")
