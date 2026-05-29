@@ -52,8 +52,9 @@ func StartWatcher(path string) {
 				lastSnapshotTime[file] = time.Now()
 
 				snapshot := models.Snapshot{
-					ID:   snapshotID,
-					File: file,
+					ID:        snapshotID,
+					File:      file,
+					CreatedAt: time.Now(),
 				}
 
 				api.AddSnapshot(snapshot)
