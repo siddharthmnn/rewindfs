@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 
 	"rewindfs/internal/models"
@@ -59,6 +60,45 @@ func StartServer() {
 
 		c.JSON(http.StatusCreated, snapshot)
 	})
+	r.POST("/restore/:id", func(c *gin.Context) {
 
+        id, err := strconv.Atoi(c.Param("id"))
+        if err != nil {
+                c.JSON(http.StatusBadRequest, gin.H{
+                        "error": "invalid snapshot id",
+                })
+                return
+        }
+
+        for _, snapshot := range Snapshots {
+
+                if snapshot.ID == id {
+
+                        err := os.WriteFile(
+                                snapshot.File,
+                                []byte(snapshot.Content),
+                                0644,
+                        )
+
+                        if err != nil {
+                                c.JSON(http.StatusInternalServerError, gin.H{
+                                        "error": err.Error(),
+                                })
+                                return
+                        }
+
+                        c.JSON(http.StatusOK, gin.H{
+                                "message": "restored",
+                                "snapshot": id,
+                        })
+
+                        return
+                }
+        }
+
+        c.JSON(http.StatusNotFound, gin.H{
+                "error": "snapshot not found",
+        })
+})
 	r.Run(":8080")
 }

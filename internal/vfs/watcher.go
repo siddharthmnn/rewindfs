@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 
 var snapshotID = 1
 
-// Prevent duplicate snapshots for the same file
 var lastSnapshotTime = make(map[string]time.Time)
 
 func StartWatcher(path string) {
@@ -42,7 +42,6 @@ func StartWatcher(path string) {
 
 				file := filepath.Base(event.Name)
 
-				// Debounce: ignore repeated writes within 3 seconds
 				if t, exists := lastSnapshotTime[file]; exists {
 					if time.Since(t) < 3*time.Second {
 						continue
@@ -51,15 +50,22 @@ func StartWatcher(path string) {
 
 				lastSnapshotTime[file] = time.Now()
 
+				content, err := os.ReadFile(event.Name)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
 				snapshot := models.Snapshot{
 					ID:        snapshotID,
 					File:      file,
+					Content:   string(content),
 					CreatedAt: time.Now(),
 				}
 
 				api.AddSnapshot(snapshot)
 
-				log.Println("Snapshot created:", snapshot)
+				log.Println("Snapshot created:", snapshot.ID)
 
 				snapshotID++
 			}
