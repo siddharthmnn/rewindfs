@@ -13,6 +13,9 @@ import (
 
 var snapshotID = 1
 
+// Prevent duplicate snapshots for the same file
+var lastSnapshotTime = make(map[string]time.Time)
+
 func StartWatcher(path string) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -37,9 +40,20 @@ func StartWatcher(path string) {
 
 			if event.Op&fsnotify.Write == fsnotify.Write {
 
+				file := filepath.Base(event.Name)
+
+				// Debounce: ignore repeated writes within 3 seconds
+				if t, exists := lastSnapshotTime[file]; exists {
+					if time.Since(t) < 3*time.Second {
+						continue
+					}
+				}
+
+				lastSnapshotTime[file] = time.Now()
+
 				snapshot := models.Snapshot{
 					ID:   snapshotID,
-					File: filepath.Base(event.Name),
+					File: file,
 				}
 
 				api.AddSnapshot(snapshot)
@@ -47,8 +61,6 @@ func StartWatcher(path string) {
 				log.Println("Snapshot created:", snapshot)
 
 				snapshotID++
-
-				time.Sleep(500 * time.Millisecond)
 			}
 
 		case err := <-watcher.Errors:
