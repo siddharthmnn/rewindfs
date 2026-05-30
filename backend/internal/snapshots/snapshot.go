@@ -1,8 +1,8 @@
 package snapshots
 
 type Snapshot struct {
-	ID       string
-	FileName string
-	Hash     string
-	Version  int
+	ID       string `json:"id"`
+	FileName string `json:"filename"`
+	Hash     string `json:"hash"`
+	Version  int    `json:"version"`
 }
