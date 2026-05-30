@@ -100,5 +100,38 @@ func StartServer() {
                 "error": "snapshot not found",
         })
 })
+r.DELETE("/snapshot/:id", func(c *gin.Context) {
+
+        id, err := strconv.Atoi(c.Param("id"))
+        if err != nil {
+                c.JSON(http.StatusBadRequest, gin.H{
+                        "error": "invalid snapshot id",
+                })
+                return
+        }
+
+        for i, snapshot := range Snapshots {
+
+                if snapshot.ID == id {
+
+                        Snapshots = append(
+                                Snapshots[:i],
+                                Snapshots[i+1:]...,
+                        )
+
+                        SaveSnapshots()
+
+                        c.JSON(http.StatusOK, gin.H{
+                                "message": "snapshot deleted",
+                        })
+
+                        return
+                }
+        }
+
+        c.JSON(http.StatusNotFound, gin.H{
+                "error": "snapshot not found",
+        })
+})
 	r.Run(":8080")
 }
