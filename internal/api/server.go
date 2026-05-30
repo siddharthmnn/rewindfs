@@ -12,10 +12,18 @@ import (
 
 func StartServer() {
 	r := gin.Default()
+
 	LoadSnapshots()
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
+		})
+	})
+
+	r.GET("/stats", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"total_snapshots": len(Snapshots),
 		})
 	})
 
@@ -60,45 +68,131 @@ func StartServer() {
 
 		c.JSON(http.StatusCreated, snapshot)
 	})
+
 	r.POST("/restore/:id", func(c *gin.Context) {
 
-        id, err := strconv.Atoi(c.Param("id"))
-        if err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{
-                        "error": "invalid snapshot id",
-                })
-                return
-        }
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid snapshot id",
+			})
+			return
+		}
 
-        for _, snapshot := range Snapshots {
+		for _, snapshot := range Snapshots {
 
-                if snapshot.ID == id {
+			if snapshot.ID == id {
 
-                        err := os.WriteFile(
-                                snapshot.File,
-                                []byte(snapshot.Content),
-                                0644,
-                        )
+				err := os.WriteFile(
+					snapshot.File,
+					[]byte(snapshot.Content),
+					0644,
+				)
 
-                        if err != nil {
-                                c.JSON(http.StatusInternalServerError, gin.H{
-                                        "error": err.Error(),
-                                })
-                                return
-                        }
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"error": err.Error(),
+					})
+					return
+				}
 
-                        c.JSON(http.StatusOK, gin.H{
-                                "message": "restored",
-                                "snapshot": id,
-                        })
+				c.JSON(http.StatusOK, gin.H{
+					"message":  "restored",
+					"snapshot": id,
+				})
 
-                        return
-                }
-        }
+				return
+			}
+		}
 
-        c.JSON(http.StatusNotFound, gin.H{
-                "error": "snapshot not found",
-        })
-})
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "snapshot not found",
+		})
+	})
+
+	r.DELETE("/snapshot/:id", func(c *gin.Context) {
+
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid snapshot id",
+			})
+			return
+		}
+
+		for i, snapshot := range Snapshots {
+
+			if snapshot.ID == id {
+
+				Snapshots = append(
+					Snapshots[:i],
+					Snapshots[i+1:]...,
+				)
+
+				SaveSnapshots()
+
+				c.JSON(http.StatusOK, gin.H{
+					"message": "snapshot deleted",
+				})
+
+				return
+			}
+		}
+
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "snapshot not found",
+		})
+	})
+	r.POST("/recover/:file", func(c *gin.Context) {
+
+  	      filename := c.Param("file")
+
+        	for i := len(Snapshots) - 1; i >= 0; i-- {
+
+                	if Snapshots[i].File == filename {
+
+                        	err := os.WriteFile(
+                                	filename,
+                                	[]byte(Snapshots[i].Content),
+                                	0644,
+                        	)
+
+                        	if err != nil {
+                                	c.JSON(http.StatusInternalServerError, gin.H{
+                                        	"error": err.Error(),
+                                	})
+                                	return
+                        	}
+
+                        	c.JSON(http.StatusOK, gin.H{
+                                	"message": "file recovered",
+                        	})
+
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+                	"error": "no snapshot found",
+        	})
+		})
+
+		r.GET("/latest/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	for i := len(Snapshots) - 1; i >= 0; i-- {
+
+                	if Snapshots[i].File == filename {
+
+                        	c.JSON(http.StatusOK, Snapshots[i])
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+        	        "error": "file not found",
+        	})
+	})
 	r.Run(":8080")
 }
