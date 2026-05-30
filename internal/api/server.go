@@ -143,6 +143,38 @@ func StartServer() {
 			"error": "snapshot not found",
 		})
 	})
+	r.POST("/recover/:file", func(c *gin.Context) {
 
+  	      filename := c.Param("file")
+
+        	for i := len(Snapshots) - 1; i >= 0; i-- {
+
+                	if Snapshots[i].File == filename {
+
+                        	err := os.WriteFile(
+                                	filename,
+                                	[]byte(Snapshots[i].Content),
+                                	0644,
+                        	)
+
+                        	if err != nil {
+                                	c.JSON(http.StatusInternalServerError, gin.H{
+                                        	"error": err.Error(),
+                                	})
+                                	return
+                        	}
+
+                        	c.JSON(http.StatusOK, gin.H{
+                                	"message": "file recovered",
+                        	})
+
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+                	"error": "no snapshot found",
+        	})
+	})
 	r.Run(":8080")
 }
