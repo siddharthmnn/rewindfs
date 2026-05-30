@@ -1,7 +1,22 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"rewindfs/internal/snapshots"
+)
 
 func main() {
-	fmt.Println("RewindFS starting...")
+
+	s := snapshots.Snapshot{
+		ID:       "snap-001",
+		FileName: "test.txt",
+		Hash:     "demo-hash",
+		Version:  1,
+	}
+
+	fmt.Println("Snapshot Created")
+	fmt.Println("File:", s.FileName)
+	fmt.Println("Version:", s.Version)
+	fmt.Println("Hash:", s.Hash)
 }
