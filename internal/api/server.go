@@ -12,7 +12,7 @@ import (
 
 func StartServer() {
 	r := gin.Default()
-
+	LoadSnapshots()
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",

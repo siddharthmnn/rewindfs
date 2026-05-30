@@ -41,6 +41,9 @@ func StartWatcher(path string) {
 			if event.Op&fsnotify.Write == fsnotify.Write {
 
 				file := filepath.Base(event.Name)
+				if file == "snapshots.json" {
+    					continue
+				}
 
 				if t, exists := lastSnapshotTime[file]; exists {
 					if time.Since(t) < 3*time.Second {
