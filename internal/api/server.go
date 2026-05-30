@@ -175,6 +175,24 @@ func StartServer() {
         	c.JSON(http.StatusNotFound, gin.H{
                 	"error": "no snapshot found",
         	})
+		})
+
+		r.GET("/latest/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	for i := len(Snapshots) - 1; i >= 0; i-- {
+
+                	if Snapshots[i].File == filename {
+
+                        	c.JSON(http.StatusOK, Snapshots[i])
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+        	        "error": "file not found",
+        	})
 	})
 	r.Run(":8080")
 }
