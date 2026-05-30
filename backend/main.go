@@ -12,6 +12,11 @@ func main() {
     content := []byte("hello rewindfs")
 
     hash := storage.GenerateHash(content)
+	if storage.IsDuplicate(hash) {
+	fmt.Println("No changes detected.")
+	fmt.Println("Snapshot skipped.")
+	return
+}
 
     s := snapshots.Snapshot{
         ID:       "snap-001",
