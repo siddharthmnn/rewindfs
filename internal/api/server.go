@@ -12,10 +12,18 @@ import (
 
 func StartServer() {
 	r := gin.Default()
+
 	LoadSnapshots()
+
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "ok",
+		})
+	})
+
+	r.GET("/stats", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"total_snapshots": len(Snapshots),
 		})
 	})
 
@@ -60,78 +68,81 @@ func StartServer() {
 
 		c.JSON(http.StatusCreated, snapshot)
 	})
+
 	r.POST("/restore/:id", func(c *gin.Context) {
 
-        id, err := strconv.Atoi(c.Param("id"))
-        if err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{
-                        "error": "invalid snapshot id",
-                })
-                return
-        }
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid snapshot id",
+			})
+			return
+		}
 
-        for _, snapshot := range Snapshots {
+		for _, snapshot := range Snapshots {
 
-                if snapshot.ID == id {
+			if snapshot.ID == id {
 
-                        err := os.WriteFile(
-                                snapshot.File,
-                                []byte(snapshot.Content),
-                                0644,
-                        )
+				err := os.WriteFile(
+					snapshot.File,
+					[]byte(snapshot.Content),
+					0644,
+				)
 
-                        if err != nil {
-                                c.JSON(http.StatusInternalServerError, gin.H{
-                                        "error": err.Error(),
-                                })
-                                return
-                        }
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"error": err.Error(),
+					})
+					return
+				}
 
-                        c.JSON(http.StatusOK, gin.H{
-                                "message": "restored",
-                                "snapshot": id,
-                        })
+				c.JSON(http.StatusOK, gin.H{
+					"message":  "restored",
+					"snapshot": id,
+				})
 
-                        return
-                }
-        }
+				return
+			}
+		}
 
-        c.JSON(http.StatusNotFound, gin.H{
-                "error": "snapshot not found",
-        })
-})
-r.DELETE("/snapshot/:id", func(c *gin.Context) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "snapshot not found",
+		})
+	})
 
-        id, err := strconv.Atoi(c.Param("id"))
-        if err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{
-                        "error": "invalid snapshot id",
-                })
-                return
-        }
+	r.DELETE("/snapshot/:id", func(c *gin.Context) {
 
-        for i, snapshot := range Snapshots {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid snapshot id",
+			})
+			return
+		}
 
-                if snapshot.ID == id {
+		for i, snapshot := range Snapshots {
 
-                        Snapshots = append(
-                                Snapshots[:i],
-                                Snapshots[i+1:]...,
-                        )
+			if snapshot.ID == id {
 
-                        SaveSnapshots()
+				Snapshots = append(
+					Snapshots[:i],
+					Snapshots[i+1:]...,
+				)
 
-                        c.JSON(http.StatusOK, gin.H{
-                                "message": "snapshot deleted",
-                        })
+				SaveSnapshots()
 
-                        return
-                }
-        }
+				c.JSON(http.StatusOK, gin.H{
+					"message": "snapshot deleted",
+				})
 
-        c.JSON(http.StatusNotFound, gin.H{
-                "error": "snapshot not found",
-        })
-})
+				return
+			}
+		}
+
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "snapshot not found",
+		})
+	})
+
 	r.Run(":8080")
 }
