@@ -4,5 +4,17 @@
     "filename": "test.txt",
     "hash": "66cc821452e47c4e78ea2539210f172153f2c035583f8bcff0ac17afa4c4d965",
     "version": 1
+  },
+  {
+    "id": "snap-001",
+    "filename": "test.txt",
+    "hash": "66cc821452e47c4e78ea2539210f172153f2c035583f8bcff0ac17afa4c4d965",
+    "version": 2
+  },
+  {
+    "id": "snap-001",
+    "filename": "test.txt",
+    "hash": "66cc821452e47c4e78ea2539210f172153f2c035583f8bcff0ac17afa4c4d965",
+    "version": 3
   }
 ]

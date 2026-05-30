@@ -17,7 +17,7 @@ func main() {
         ID:       "snap-001",
         FileName: "test.txt",
         Hash:     hash,
-        Version:  1,
+        Version: storage.GetNextVersion(),
     }
 	err := storage.SaveSnapshot(s)
 
