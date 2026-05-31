@@ -71,6 +71,23 @@ func StartServer() {
 
         	c.JSON(http.StatusOK, results)
 	})
+	r.GET("/snapshot-count/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	count := 0
+
+        	for _, snapshot := range Snapshots {
+                	if snapshot.File == filename {
+                        	count++
+                	}
+        	}
+
+        	c.JSON(http.StatusOK, gin.H{
+               		"file":  filename,
+                	"count": count,
+        	})
+	})
 	r.GET("/snapshot/:id", func(c *gin.Context) {
 
 		id, err := strconv.Atoi(c.Param("id"))
