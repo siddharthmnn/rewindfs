@@ -300,5 +300,22 @@ func StartServer() {
         	        "error": "file not found",
         	})
 	})
+	r.GET("/snapshot-oldest/:file", func(c *gin.Context) {
+
+	        filename := c.Param("file")
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+
+                        	c.JSON(http.StatusOK, snapshot)
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+                	"error": "file not found",
+        	})
+	})
 	r.Run(":8080")
 }
