@@ -3,6 +3,8 @@ package storage
 import (
 	"database/sql"
 
+	"rewindfs/internal/snapshots"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -51,4 +53,28 @@ func SaveSnapshot(s snapshots.Snapshot) error {
 	)
 
 	return err
+}
+func GetSnapshot(id string) (*snapshots.Snapshot, error) {
+
+	row := DB.QueryRow(
+		`SELECT id, filename, hash, version
+		 FROM snapshots
+		 WHERE id = ?`,
+		id,
+	)
+
+	var s snapshots.Snapshot
+
+	err := row.Scan(
+		&s.ID,
+		&s.FileName,
+		&s.Hash,
+		&s.Version,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &s, nil
 }
