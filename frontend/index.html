@@ -17,6 +17,11 @@
 	<div id="fileInfo">
 	    Click a file...
 	</div>
+	
+	<h2>History</h2>
+	<div id="history">
+    		Click a file...
+	</div>
 
     <script>
 	async function loadFileInfo(file) {
@@ -26,11 +31,24 @@
 
     		const count = await fetch(`http://localhost:8080/snapshot-count/${file}`);
     		const countData = await count.json();
+		const history = await fetch(`http://localhost:8080/history/${file}`);
+		const historyData = await history.json();
 		document.getElementById("fileInfo").innerHTML = `
     			<b>File:</b> ${file}<br>
     			<b>Latest Snapshot ID:</b> ${latestData.latest_id}<br>
     			<b>Snapshot Count:</b> ${countData.count}
 		`;
+		let historyHtml = "";
+
+		historyData.forEach(snapshot => {
+    			historyHtml += `
+        			Snapshot ID: ${snapshot.id}<br>
+        			Created: ${snapshot.created_at}<br><br>
+    			`;
+		});
+
+		document.getElementById("history").innerHTML = historyHtml;
+
 	}
 
         async function loadStats() {
