@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RewindFS Dashboard</title>
+</head>
+<body>
+
+    <h1>RewindFS Dashboard</h1>
+
+    <h2>Stats</h2>
+    <div id="stats">Loading...</div>
+
+    <h2>Files</h2>
+    <ul id="files"></ul>
+	
+	<h2>File Info</h2>
+	<div id="fileInfo">
+	    Click a file...
+	</div>
+
+    <script>
+	async function loadFileInfo(file) {
+
+    		const latest = await fetch(`http://localhost:8080/snapshot-latest-id/${file}`);
+    		const latestData = await latest.json();
+
+    		const count = await fetch(`http://localhost:8080/snapshot-count/${file}`);
+    		const countData = await count.json();
+		document.getElementById("fileInfo").innerHTML = `
+    			<b>File:</b> ${file}<br>
+    			<b>Latest Snapshot ID:</b> ${latestData.latest_id}<br>
+    			<b>Snapshot Count:</b> ${countData.count}
+		`;
+	}
+
+        async function loadStats() {
+            const response = await fetch("http://localhost:8080/stats");
+            const stats = await response.json();
+
+            document.getElementById("stats").innerHTML =
+                `
+                Total Snapshots: ${stats.total_snapshots}<br>
+                Tracked Files: ${stats.tracked_files}<br>
+                Unique Hashes: ${stats.unique_hashes}
+                `;
+        }
+
+        async function loadFiles() {
+            const response = await fetch("http://localhost:8080/files");
+            const data = await response.json();
+
+            const filesList = document.getElementById("files");
+
+            data.files.forEach(file => {
+                const li = document.createElement("li");
+                li.innerHTML = `
+    			<a href="#" onclick="loadFileInfo('${file}')">
+        			${file}
+    			</a>
+			`;
+
+		filesList.appendChild(li);
+            });
+        }
+
+        loadStats();
+        loadFiles();
+    </script>
+
+</body>
+</html>
