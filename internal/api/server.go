@@ -30,7 +30,21 @@ func StartServer() {
 	r.GET("/snapshots", func(c *gin.Context) {
 		c.JSON(http.StatusOK, Snapshots)
 	})
+	r.GET("/snapshots/file/:name", func(c *gin.Context) {
 
+  	      name := c.Param("name")
+
+        	var results []models.Snapshot
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == name {
+                        	results = append(results, snapshot)
+                	}
+        	}
+
+        	c.JSON(http.StatusOK, results)
+	})
 	r.GET("/snapshot/:id", func(c *gin.Context) {
 
 		id, err := strconv.Atoi(c.Param("id"))
