@@ -24,15 +24,18 @@ func StartServer() {
 	r.GET("/stats", func(c *gin.Context) {
 
         	filesMap := make(map[string]bool)
+		hashMap := make(map[string]bool)
 
-        	for _, snapshot := range Snapshots {
-                	filesMap[snapshot.File] = true
-        	}
+		for _, snapshot := range Snapshots {
+        		filesMap[snapshot.File] = true
+        		hashMap[snapshot.Hash] = true
+		}
 
-        	c.JSON(http.StatusOK, gin.H{
-                	"total_snapshots": len(Snapshots),
-                	"tracked_files":  len(filesMap),
-        	})
+		c.JSON(http.StatusOK, gin.H{
+        		"total_snapshots": len(Snapshots),
+        		"tracked_files":  len(filesMap),
+        		"unique_hashes":  len(hashMap),
+		})
 	})
 
 	r.GET("/snapshots", func(c *gin.Context) {
