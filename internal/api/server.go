@@ -154,10 +154,19 @@ func StartServer() {
         	}
 
         	c.JSON(http.StatusOK, gin.H{
-                	"snapshot1": id1,
-                	"snapshot2": id2,
-                	"same":      snap1.Content == snap2.Content,
-        	})
+        		"snapshot1": id1,
+        		"snapshot2": id2,
+        		"same":      snap1.Content == snap2.Content,
+
+        		"file1": snap1.File,
+        		"file2": snap2.File,
+
+        		"content1": snap1.Content,
+        		"content2": snap2.Content,
+
+        		"length1": len(snap1.Content),
+        		"length2": len(snap2.Content),
+		})
 	})
 	r.POST("/snapshot", func(c *gin.Context) {
 
