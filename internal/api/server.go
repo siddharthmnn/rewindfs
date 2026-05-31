@@ -30,6 +30,24 @@ func StartServer() {
 	r.GET("/snapshots", func(c *gin.Context) {
 		c.JSON(http.StatusOK, Snapshots)
 	})
+	r.GET("/files", func(c *gin.Context) {
+
+        	filesMap := make(map[string]bool)
+
+        	for _, snapshot := range Snapshots {
+	      	        filesMap[snapshot.File] = true
+        	}
+
+        	var files []string
+
+        	for file := range filesMap {
+                	files = append(files, file)
+        	}
+	
+        	c.JSON(http.StatusOK, gin.H{
+                	"files": files,
+        	})
+	})
 	r.GET("/snapshots/file/:name", func(c *gin.Context) {
 
   	      name := c.Param("name")
