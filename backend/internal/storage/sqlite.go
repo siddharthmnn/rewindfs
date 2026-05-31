@@ -1,9 +1,9 @@
 package storage
 
 import (
-    "database/sql"
+	"database/sql"
 
-    _ "modernc.org/sqlite"
+	_ "modernc.org/sqlite"
 )
 
 var DB *sql.DB
@@ -26,14 +26,29 @@ func createTables() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS snapshots (
 		id TEXT PRIMARY KEY,
-		file TEXT,
-		content TEXT,
+		filename TEXT,
 		hash TEXT,
-		created_at TEXT
+		version INTEGER
 	);
 	`
 
 	_, err := DB.Exec(query)
+
+	return err
+}
+
+	
+func SaveSnapshot(s snapshots.Snapshot) error {
+
+	_, err := DB.Exec(
+		`INSERT INTO snapshots
+		(id, filename, hash, version)
+		VALUES (?, ?, ?, ?)`,
+		s.ID,
+		s.FileName,
+		s.Hash,
+		s.Version,
+	)
 
 	return err
 }
