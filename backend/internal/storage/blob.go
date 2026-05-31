@@ -7,7 +7,12 @@ import (
 
 func SaveBlob(hash string, data []byte) error {
 
-	path := filepath.Join("../storage/blobs", hash)
+	path := filepath.Join("storage", "blobs", hash)
+
+	err := os.MkdirAll("storage/blobs", 0755)
+	if err != nil {
+		return err
+	}
 
 	return os.WriteFile(path, data, 0644)
 }
