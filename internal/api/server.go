@@ -12,7 +12,18 @@ import (
 
 func StartServer() {
 	r := gin.Default()
+	r.Use(func(c *gin.Context) {
+	    c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	    c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	    c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
 
+	    if c.Request.Method == "OPTIONS" {
+	        c.AbortWithStatus(204)
+	        return
+	    }
+
+	    c.Next()
+	})
 	LoadSnapshots()
 
 	r.GET("/health", func(c *gin.Context) {
@@ -22,37 +33,155 @@ func StartServer() {
 	})
 
 	r.GET("/stats", func(c *gin.Context) {
+
+        	filesMap := make(map[string]bool)
+		hashMap := make(map[string]bool)
+
+		for _, snapshot := range Snapshots {
+        		filesMap[snapshot.File] = true
+        		hashMap[snapshot.Hash] = true
+		}
+
 		c.JSON(http.StatusOK, gin.H{
-			"total_snapshots": len(Snapshots),
+        		"total_snapshots": len(Snapshots),
+        		"tracked_files":  len(filesMap),
+        		"unique_hashes":  len(hashMap),
 		})
 	})
 
 	r.GET("/snapshots", func(c *gin.Context) {
 		c.JSON(http.StatusOK, Snapshots)
 	})
+	r.GET("/files", func(c *gin.Context) {
 
+        	filesMap := make(map[string]bool)
+
+        	for _, snapshot := range Snapshots {
+	      	        filesMap[snapshot.File] = true
+        	}
+
+        	var files []string
+
+        	for file := range filesMap {
+                	files = append(files, file)
+        	}
+	
+        	c.JSON(http.StatusOK, gin.H{
+                	"files": files,
+        	})
+	})
+	r.GET("/snapshots/file/:name", func(c *gin.Context) {
+
+  	      name := c.Param("name")
+
+        	var results []models.Snapshot
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == name {
+                        	results = append(results, snapshot)
+                	}
+        	}
+
+        	c.JSON(http.StatusOK, results)
+	})
+	r.GET("/snapshot-count/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	count := 0
+
+        	for _, snapshot := range Snapshots {
+                	if snapshot.File == filename {
+                        	count++
+                	}
+        	}
+
+        	c.JSON(http.StatusOK, gin.H{
+               		"file":  filename,
+                	"count": count,
+        	})
+	})
 	r.GET("/snapshot/:id", func(c *gin.Context) {
 
-		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid snapshot id",
-			})
-			return
-		}
-
-		for _, snapshot := range Snapshots {
-			if snapshot.ID == id {
-				c.JSON(http.StatusOK, snapshot)
+			id, err := strconv.Atoi(c.Param("id"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": "invalid snapshot id",
+				})
 				return
 			}
-		}
 
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "snapshot not found",
+			for _, snapshot := range Snapshots {
+				if snapshot.ID == id {
+					c.JSON(http.StatusOK, snapshot)
+					return
+				}
+			}
+
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "snapshot not found",
+			})
+		})
+		r.GET("/diff/:id1/:id2", func(c *gin.Context) {
+
+        	id1, err := strconv.Atoi(c.Param("id1"))
+        	if err != nil {
+                	c.JSON(http.StatusBadRequest, gin.H{
+                        	"error": "invalid snapshot id",
+                	})
+                	return
+        	}
+
+        	id2, err := strconv.Atoi(c.Param("id2"))
+        	if err != nil {
+                	c.JSON(http.StatusBadRequest, gin.H{
+                	        "error": "invalid snapshot id",
+                	})
+                	return
+        	}
+
+        	var snap1 models.Snapshot
+        	var snap2 models.Snapshot
+
+        	found1 := false
+        	found2 := false
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.ID == id1 {
+                        	snap1 = snapshot
+                        	found1 = true
+                	}
+
+                	if snapshot.ID == id2 {
+                	        snap2 = snapshot
+                	        found2 = true
+                	}
+        	}
+
+        	if !found1 || !found2 {
+                	c.JSON(http.StatusNotFound, gin.H{
+                        	"error": "snapshot not found",
+                	})
+        	        return
+        	}
+
+        	c.JSON(http.StatusOK, gin.H{
+        		"snapshot1": id1,
+        		"snapshot2": id2,
+        		"same":      snap1.Content == snap2.Content,
+
+        		"file1": snap1.File,
+        		"file2": snap2.File,
+
+        		"content1": snap1.Content,
+        		"content2": snap2.Content,
+
+        		"length1": len(snap1.Content),
+        		"length2": len(snap2.Content),
 		})
 	})
-
 	r.POST("/snapshot", func(c *gin.Context) {
 
 		var snapshot models.Snapshot
@@ -192,6 +321,140 @@ func StartServer() {
 
         	c.JSON(http.StatusNotFound, gin.H{
         	        "error": "file not found",
+        	})
+	})
+	r.GET("/snapshot-oldest/:file", func(c *gin.Context) {
+
+	        filename := c.Param("file")
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+
+                        	c.JSON(http.StatusOK, snapshot)
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+                	"error": "file not found",
+        	})
+	})
+	
+	r.GET("/history/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	var history []gin.H
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+
+                        	history = append(history, gin.H{
+                                	"id":         snapshot.ID,
+                                	"created_at": snapshot.CreatedAt,
+                        	})
+                	}
+        	}
+
+        	if len(history) == 0 {
+                	c.JSON(http.StatusNotFound, gin.H{
+                        	"error": "file not found",
+                	})
+                	return
+        	}
+
+        	c.JSON(http.StatusOK, history)
+	})
+
+	r.GET("/history-full/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	var history []models.Snapshot
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+                        	history = append(history, snapshot)
+                	}
+        	}
+
+        	if len(history) == 0 {
+                	c.JSON(http.StatusNotFound, gin.H{
+                        	"error": "file not found",
+                	})
+                	return
+        	}
+
+        	c.JSON(http.StatusOK, history)
+	})
+
+	r.GET("/files/:name/exists", func(c *gin.Context) {
+
+        	filename := c.Param("name")
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+
+                        	c.JSON(http.StatusOK, gin.H{
+                                	"exists": true,
+                        	})
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusOK, gin.H{
+                	"exists": false,
+        	})
+	})
+
+	r.GET("/snapshot-latest-id/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	latestID := -1
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+                        	latestID = snapshot.ID
+                	}
+        	}
+
+        	if latestID == -1 {
+                	c.JSON(http.StatusNotFound, gin.H{
+                        	"error": "file not found",
+                	})
+                	return
+        	}
+
+        	c.JSON(http.StatusOK, gin.H{
+                	"file":      filename,
+                	"latest_id": latestID,
+        	})
+	})
+
+	r.GET("/snapshot-first-id/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+
+                        	c.JSON(http.StatusOK, gin.H{
+                                	"file":     filename,
+                                	"first_id": snapshot.ID,
+                        	})
+                        	return
+                	}
+        	}
+
+        	c.JSON(http.StatusNotFound, gin.H{
+                	"error": "file not found",
         	})
 	})
 	r.Run(":8080")
