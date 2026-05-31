@@ -353,5 +353,28 @@ func StartServer() {
 
         	c.JSON(http.StatusOK, history)
 	})
+
+	r.GET("/history-full/:file", func(c *gin.Context) {
+
+        	filename := c.Param("file")
+
+        	var history []models.Snapshot
+
+        	for _, snapshot := range Snapshots {
+
+                	if snapshot.File == filename {
+                        	history = append(history, snapshot)
+                	}
+        	}
+
+        	if len(history) == 0 {
+                	c.JSON(http.StatusNotFound, gin.H{
+                        	"error": "file not found",
+                	})
+                	return
+        	}
+
+        	c.JSON(http.StatusOK, history)
+	})
 	r.Run(":8080")
 }
