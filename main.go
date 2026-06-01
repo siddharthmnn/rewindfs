@@ -1,12 +1,39 @@
 package main
 
 import (
-	"rewindfs/internal/api"
-	"rewindfs/internal/vfs"
+	"fmt"
+
+	"rewindfs/internal/storage"
 )
 
 func main() {
-	go vfs.StartWatcher(".")
 
-	api.StartServer()
+	err := storage.InitDB()
+	if err != nil {
+		fmt.Println("Database Error:", err)
+		return
+	}
+
+	err = storage.RestoreSnapshot(
+		"snap-001",
+		"restored.txt",
+	)
+
+	if err != nil {
+		fmt.Println("Restore Error:", err)
+		return
+	}
+
+	snapshot, err := storage.GetSnapshot("snap-001")
+
+	if err != nil {
+		fmt.Println("Snapshot Error:", err)
+		return
+	}
+
+	fmt.Println("Restore Successfully!")
+	fmt.Println("Snapshot ID:", snapshot.ID)
+	fmt.Println("File Name:", snapshot.FileName)
+	fmt.Println("Hash:", snapshot.Hash)
+	fmt.Println("Version:", snapshot.Version)
 }
