@@ -16,3 +16,9 @@ func SaveBlob(hash string, data []byte) error {
 
 	return os.WriteFile(path, data, 0644)
 }
+func LoadBlob(hash string) ([]byte, error) {
+
+	path := filepath.Join("storage", "blobs", hash)
+
+	return os.ReadFile(path)
+}

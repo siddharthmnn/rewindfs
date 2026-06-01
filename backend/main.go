@@ -2,30 +2,20 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	"rewindfs/internal/storage"
 )
 
 func main() {
 
-	content, err := os.ReadFile("text.txt")
+	hash := "fa8efa7b40ee2b2bf031f4790373b12586069e4572807cbecede997723798ac5"
+
+	err := storage.RestoreFile(hash, "restored.txt")
+
 	if err != nil {
-		fmt.Println("Read Error:", err)
+		fmt.Println("Restore Error:", err)
 		return
 	}
 
-	hash := storage.GenerateHash(content)
-
-	fmt.Println("File Content:", string(content))
-	fmt.Println("Hash:", hash)
-
-	err = storage.SaveBlob(hash, content)
-
-	if err != nil {
-		fmt.Println("Blob Error:", err)
-		return
-	}
-
-	fmt.Println("Blob Saved Successfully!")
+	fmt.Println("Restore Successfully!")
 }
