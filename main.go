@@ -2,38 +2,31 @@ package main
 
 import (
 	"fmt"
+	"os"
 
-	"rewindfs/internal/storage"
+	"rewindfs/internal/diff"
 )
 
 func main() {
 
-	err := storage.InitDB()
+	oldData, err := os.ReadFile("old.txt")
+
 	if err != nil {
-		fmt.Println("Database Error:", err)
+		fmt.Println(err)
 		return
 	}
 
-	err = storage.RestoreSnapshot(
-		"snap-001",
-		"restored.txt",
+	newData, err := os.ReadFile("new.txt")
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	result := diff.Compare(
+		string(oldData),
+		string(newData),
 	)
 
-	if err != nil {
-		fmt.Println("Restore Error:", err)
-		return
-	}
-
-	snapshot, err := storage.GetSnapshot("snap-001")
-
-	if err != nil {
-		fmt.Println("Snapshot Error:", err)
-		return
-	}
-
-	fmt.Println("Restore Successfully!")
-	fmt.Println("Snapshot ID:", snapshot.ID)
-	fmt.Println("File Name:", snapshot.FileName)
-	fmt.Println("Hash:", snapshot.Hash)
-	fmt.Println("Version:", snapshot.Version)
+	fmt.Println(result)
 }
