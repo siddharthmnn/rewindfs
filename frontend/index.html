@@ -27,8 +27,15 @@
 	<div id="snapshotContent">
     		Click a snapshot...
 	</div>
-
+	<h2>Diff Viewer</h2>
+	<div id="diffViewer">
+    		Select two snapshots...
+	</div>
     <script>
+
+	let selectedSnapshot1 = null;
+	let selectedSnapshot2 = null;
+
 	async function loadFileInfo(file) {
 
     		const latest = await fetch(`http://localhost:8080/snapshot-latest-id/${file}`);
@@ -62,11 +69,37 @@
 
         	const response = await fetch(`http://localhost:8080/snapshot/${id}`);
         	const snapshot = await response.json();
+		
+		if (selectedSnapshot1 === null) {
+		        selectedSnapshot1 = id;
+		} else if (selectedSnapshot2 === null) {
+		        selectedSnapshot2 = id;
+		} else {
+		        selectedSnapshot1 = selectedSnapshot2;
+		        selectedSnapshot2 = id;
+		}
 
         	document.getElementById("snapshotContent").innerHTML = `
                 	<b>Snapshot ID:</b> ${snapshot.id}<br><br>
                 	<pre>${snapshot.content}</pre>
         	`;
+
+		if (selectedSnapshot1 !== null && selectedSnapshot2 !== null) {
+
+		        const diffResponse = await fetch(
+                		`http://localhost:8080/diff/${selectedSnapshot1}/${selectedSnapshot2}`
+		        );
+
+        		const diffData = await diffResponse.json();
+
+        		document.getElementById("diffViewer").innerHTML = `
+                		<b>Snapshot 1:</b> ${selectedSnapshot1}<br>
+                		<b>Snapshot 2:</b> ${selectedSnapshot2}<br><br>
+
+                		<pre>${diffData.diff}</pre>
+        		`;
+		}
+
 	}
 
         async function loadStats() {
