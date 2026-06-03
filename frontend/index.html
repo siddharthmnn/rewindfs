@@ -22,6 +22,11 @@
 	<div id="history">
     		Click a file...
 	</div>
+	
+	<h2>Snapshot Content</h2>
+	<div id="snapshotContent">
+    		Click a snapshot...
+	</div>
 
     <script>
 	async function loadFileInfo(file) {
@@ -41,14 +46,27 @@
 		let historyHtml = "";
 
 		historyData.forEach(snapshot => {
-    			historyHtml += `
-        			Snapshot ID: ${snapshot.id}<br>
-        			Created: ${snapshot.created_at}<br><br>
-    			`;
+        		historyHtml += `
+                		<a href="#" onclick="loadSnapshot(${snapshot.id})">
+                		        Snapshot ID: ${snapshot.id}
+                		</a><br>
+                		Created: ${snapshot.created_at}<br><br>
+        		`;
 		});
 
 		document.getElementById("history").innerHTML = historyHtml;
 
+	}
+
+	async function loadSnapshot(id) {
+
+        	const response = await fetch(`http://localhost:8080/snapshot/${id}`);
+        	const snapshot = await response.json();
+
+        	document.getElementById("snapshotContent").innerHTML = `
+                	<b>Snapshot ID:</b> ${snapshot.id}<br><br>
+                	<pre>${snapshot.content}</pre>
+        	`;
 	}
 
         async function loadStats() {
