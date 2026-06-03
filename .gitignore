@@ -32,3 +32,17 @@ go.work.sum
 # .vscode/
 notes.txt
 snapshots.json
+# Databases
+*.db
+
+# Generated blobs
+backend/storage/blobs/
+
+# Test files
+backend/old.txt
+backend/new.txt
+backend/restored.txt
+backend/text.txt
+
+# Build files
+*.exe
