@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-
+	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
 
 	"github.com/gin-gonic/gin"
@@ -167,11 +167,16 @@ func StartServer() {
         	        return
         	}
 
+		diffResult := diff.Compare(
+        		snap1.Content,
+        		snap2.Content,
+		)
+
         	c.JSON(http.StatusOK, gin.H{
         		"snapshot1": id1,
         		"snapshot2": id2,
         		"same":      snap1.Content == snap2.Content,
-
+			"diff": diffResult,
         		"file1": snap1.File,
         		"file2": snap2.File,
 
