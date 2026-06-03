@@ -27,6 +27,9 @@
 	<div id="snapshotContent">
     		Click a snapshot...
 	</div>
+	<button onclick="restoreSelectedSnapshot()">
+        	Restore Snapshot
+	</button>
 	<h2>Diff Viewer</h2>
 	<div id="diffViewer">
     		Select two snapshots...
@@ -35,6 +38,7 @@
 
 	let selectedSnapshot1 = null;
 	let selectedSnapshot2 = null;
+	let currentSnapshotId = null;
 
 	async function loadFileInfo(file) {
 
@@ -69,7 +73,7 @@
 
         	const response = await fetch(`http://localhost:8080/snapshot/${id}`);
         	const snapshot = await response.json();
-		
+		currentSnapshotId = id;		
 		if (selectedSnapshot1 === null) {
 		        selectedSnapshot1 = id;
 		} else if (selectedSnapshot2 === null) {
@@ -100,6 +104,25 @@
         		`;
 		}
 
+	}
+
+	async function restoreSelectedSnapshot() {
+
+	        if (currentSnapshotId === null) {
+        	        alert("Select a snapshot first");
+        	        return;
+        	}
+
+        	const response = await fetch(
+                	`http://localhost:8080/restore/${currentSnapshotId}`,
+                	{
+                        	method: "POST"
+                	}
+        	);
+
+        	const data = await response.json();
+
+        	alert(JSON.stringify(data));
 	}
 
         async function loadStats() {
