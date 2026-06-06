@@ -1,7 +1,11 @@
 package main
 
-import "rewindfs/internal/api"
+import (
+        "rewindfs/internal/api"
+        "rewindfs/internal/vfs"
+)
 
 func main() {
-	api.StartServer()
+        go vfs.StartWatcher(".")
+        api.StartServer()
 }

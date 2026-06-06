@@ -1,10 +1,30 @@
 package api
 
-import "rewindfs/internal/models"
+import (
+	"time"
+        "rewindfs/internal/models"
+        "rewindfs/internal/storage"
+)
+
 
 var Snapshots []models.Snapshot
 
-func AddSnapshot(snapshot models.Snapshot) {
+func AddSnapshot(snapshot *models.Snapshot) {
+
+	snapshot.Hash = storage.GenerateHash(
+	       []byte(snapshot.Content),
+	)
+	snapshot.CreatedAt = time.Now()
+
+	maxID := 0
+
+	for _, s := range Snapshots {
+        	if s.ID > maxID {
+                	maxID = s.ID
+        	}
+	}
+
+	snapshot.ID = maxID + 1
 
         for i := len(Snapshots) - 1; i >= 0; i-- {
 
@@ -18,6 +38,6 @@ func AddSnapshot(snapshot models.Snapshot) {
                 }
         }
 
-        Snapshots = append(Snapshots, snapshot)
+        Snapshots = append(Snapshots, *snapshot)
         SaveSnapshots()
 }

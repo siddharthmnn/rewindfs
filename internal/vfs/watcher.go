@@ -8,11 +8,8 @@ import (
 
 	"rewindfs/internal/api"
 	"rewindfs/internal/models"
-	"rewindfs/internal/storage"
 	"github.com/fsnotify/fsnotify"
 )
-
-var snapshotID = 1
 
 var lastSnapshotTime = make(map[string]time.Time)
 
@@ -60,18 +57,13 @@ func StartWatcher(path string) {
 				}
 
 				snapshot := models.Snapshot{
-        				ID:        snapshotID,
         				File:      file,
         				Content:   string(content),
-        				Hash:      storage.GenerateHash(content),
-        				CreatedAt: time.Now(),
 				}
 
-				api.AddSnapshot(snapshot)
+				api.AddSnapshot(&snapshot)
 
 				log.Println("Snapshot created:", snapshot.ID)
-
-				snapshotID++
 			}
 
 		case err := <-watcher.Errors:

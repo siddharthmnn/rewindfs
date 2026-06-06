@@ -198,7 +198,7 @@ func StartServer() {
 			return
 		}
 
-		AddSnapshot(snapshot)
+		AddSnapshot(&snapshot)
 
 		c.JSON(http.StatusCreated, snapshot)
 	})
