@@ -2,9 +2,9 @@
 
 🚧 Work in Progress
 
-rewindfs is a Git-inspired virtual filesystem project focused on snapshotting, rollback, file recovery, file history, and versioned storage.
+rewindfs is a Git-inspired snapshotting filesystem project focused on file versioning, rollback, recovery, history tracking, deduplication, and storage efficiency.
 
-The project explores how modern version-control systems and snapshot-based filesystems manage file state, recovery, historical versions, content hashing, and storage efficiency through a simplified implementation built in Go.
+The project explores how modern version-control systems and snapshot-based filesystems manage historical file state through automatic snapshot creation, content hashing, recovery workflows, and version-aware storage.
 
 ## Goals
 
@@ -15,6 +15,8 @@ The project explores how modern version-control systems and snapshot-based files
 * Compare changes between snapshots
 * Reduce duplicate storage using content hashing
 * Explore filesystem and storage design concepts
+* Build maintainable backend architecture
+* Implement automated testing and CI/CD
 
 ## Current Progress
 
@@ -37,17 +39,21 @@ The project explores how modern version-control systems and snapshot-based files
 * [x] Snapshot comparison API
 * [x] SHA256 content hashing
 * [x] Duplicate snapshot prevention
+* [x] Automated unit tests
+* [x] GitHub Actions CI pipeline
+* [x] API route modularization
 * [ ] Metadata indexing
 * [ ] CLI interface
 * [ ] Frontend dashboard
+* [ ] SQLite storage backend
 * [ ] Recovery testing
 
 ## Implemented Features
 
 ### Snapshot Management
 
-* Automatic file monitoring
-* Snapshot creation on file changes
+* Automatic file monitoring using fsnotify
+* Snapshot creation on file modification
 * Persistent snapshot storage
 * Timestamped snapshots
 * Snapshot listing
@@ -62,7 +68,7 @@ The project explores how modern version-control systems and snapshot-based files
 ### Recovery
 
 * Restore a file from a specific snapshot
-* Recover deleted files using the most recent snapshot
+* Recover deleted files using the latest snapshot
 
 ### Diff and History
 
@@ -70,6 +76,7 @@ The project explores how modern version-control systems and snapshot-based files
 * View snapshot history metadata
 * View complete snapshot history
 * Track historical versions of files
+* Retrieve first and latest snapshot IDs
 
 ### Storage Optimization
 
@@ -77,35 +84,82 @@ The project explores how modern version-control systems and snapshot-based files
 * Hash-based snapshot identification
 * Duplicate snapshot prevention
 * Unique hash statistics
+* Content-based deduplication
+
+### Testing & Quality
+
+* Unit tests for hashing
+* Unit tests for snapshot management
+* Unit tests for deduplication
+* Unit tests for diff functionality
+* GitHub Actions automated test execution
+* Automated validation on every push
+
+### API Architecture
+
+* Route modularization
+* Dedicated stats handler module
+* Dedicated history handler module
+* Reduced server.go complexity
+* Incremental backend refactoring
 
 ### API Endpoints
 
+#### System
+
 * `GET /health`
 * `GET /stats`
+
+#### Snapshot APIs
+
 * `GET /snapshots`
-* `GET /files`
 * `GET /snapshot/:id`
-* `GET /latest/:file`
-* `GET /snapshot-oldest/:file`
 * `GET /snapshot-count/:file`
 * `GET /snapshots/file/:name`
-* `GET /history/:file`
-* `GET /history-full/:file`
-* `GET /files/:file/exists`
-* `GET /snapshot-latest-id/:file`
-* `GET /snapshot-first-id/:file`
-* `GET /diff/:id1/:id2`
 * `POST /snapshot`
-* `POST /restore/:id`
-* `POST /recover/:file`
 * `DELETE /snapshot/:id`
 
-### Storage
+#### History APIs
+
+* `GET /latest/:file`
+* `GET /snapshot-oldest/:file`
+* `GET /history/:file`
+* `GET /history-full/:file`
+* `GET /snapshot-latest-id/:file`
+* `GET /snapshot-first-id/:file`
+
+#### Recovery APIs
+
+* `POST /restore/:id`
+* `POST /recover/:file`
+
+#### Utility APIs
+
+* `GET /files`
+* `GET /files/:name/exists`
+* `GET /diff/:id1/:id2`
+
+## Storage
 
 * JSON-based snapshot persistence
 * SHA256 content hashing
 * In-memory snapshot indexing
 * Duplicate snapshot filtering
+* Content-based version tracking
+
+## Project Structure
+
+```text
+internal/
+├── api/
+│   ├── server.go
+│   ├── stats_handlers.go
+│   └── history_handlers.go
+├── diff/
+├── models/
+├── storage/
+└── vfs/
+```
 
 ## Planned Features
 
@@ -117,6 +171,8 @@ The project explores how modern version-control systems and snapshot-based files
 * Storage optimization metrics
 * SQLite-backed storage
 * Snapshot export/import
+* Snapshot search
+* Multi-directory monitoring
 
 ## Project Focus
 
@@ -130,13 +186,17 @@ This project is being built to gain practical experience with:
 * Content hashing
 * Deduplication techniques
 * Backend API development
+* Automated testing
+* CI/CD workflows
 * Systems programming in Go
 
 ## Tech Stack
 
 * Go
 * Gin
+* fsnotify
 * JSON Storage
+* GitHub Actions
 * SQLite (planned)
 * Linux
 * File I/O
@@ -148,33 +208,36 @@ Currently under active development.
 
 ### Recent Milestones
 
-* Persistent snapshot storage
-* Snapshot restore functionality
-* Snapshot deletion functionality
-* Deleted file recovery
-* Snapshot statistics endpoint
-* File history tracking
-* Snapshot comparison API
-* SHA256 content hashing
+* Automatic snapshot watcher integration
+* SHA256 hashing implementation
 * Duplicate snapshot prevention
-* Storage efficiency statistics
+* Snapshot comparison API
+* Recovery and restore functionality
+* Automated test suite
+* GitHub Actions CI pipeline
+* API route modularization
+* Server architecture cleanup
 
 ## Contributors
 
-* Siddharth S Menon
+### Siddharth S Menon
 
-  * Snapshot management APIs
-  * Recovery APIs
-  * Statistics endpoints
-  * History and lookup endpoints
-  * Snapshot comparison APIs
-  * Deduplication implementation
+* Snapshot management APIs
+* Recovery APIs
+* Statistics endpoints
+* History and lookup endpoints
+* Snapshot comparison APIs
+* Deduplication implementation
+* Automated testing
+* GitHub Actions integration
+* API refactoring and modularization
 
-* Tanisha Khoria
+### Tanisha Khoria
 
-  * Snapshot engine
-  * Filesystem watcher
-  * Persistence layer
-  * Core snapshot infrastructure
-  * Storage architecture
-  * Hashing integration
+* Snapshot engine
+* Filesystem watcher
+* Persistence layer
+* Core snapshot infrastructure
+* Storage architecture
+* Hashing integration
+* Snapshot automation
