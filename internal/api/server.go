@@ -6,11 +6,18 @@ import (
 	"strconv"
 	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
-
+	"rewindfs/internal/storage"
 	"github.com/gin-gonic/gin"
 )
 
 func StartServer() {
+
+	if err := storage.InitDB(); err != nil {
+        	panic(err)
+	}
+
+	defer storage.CloseDB()
+
 	r := gin.Default()
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
