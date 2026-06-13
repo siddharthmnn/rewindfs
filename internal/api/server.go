@@ -14,6 +14,7 @@ func StartServer() {
 	r := gin.Default()
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
+	RegisterLookupRoutes(r)
 	r.Use(func(c *gin.Context) {
 	    c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 	    c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -28,59 +29,6 @@ func StartServer() {
 	})
 	LoadSnapshots()
 	
-	r.GET("/snapshots/file/:name", func(c *gin.Context) {
-
-  	      name := c.Param("name")
-
-        	var results []models.Snapshot
-
-        	for _, snapshot := range Snapshots {
-
-                	if snapshot.File == name {
-                        	results = append(results, snapshot)
-                	}
-        	}
-
-        	c.JSON(http.StatusOK, results)
-	})
-	r.GET("/snapshot-count/:file", func(c *gin.Context) {
-
-        	filename := c.Param("file")
-
-        	count := 0
-
-        	for _, snapshot := range Snapshots {
-                	if snapshot.File == filename {
-                        	count++
-                	}
-        	}
-
-        	c.JSON(http.StatusOK, gin.H{
-               		"file":  filename,
-                	"count": count,
-        	})
-	})
-	r.GET("/snapshot/:id", func(c *gin.Context) {
-
-			id, err := strconv.Atoi(c.Param("id"))
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "invalid snapshot id",
-				})
-				return
-			}
-
-			for _, snapshot := range Snapshots {
-				if snapshot.ID == id {
-					c.JSON(http.StatusOK, snapshot)
-					return
-				}
-			}
-
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "snapshot not found",
-			})
-		})
 		r.GET("/diff/:id1/:id2", func(c *gin.Context) {
 
         	id1, err := strconv.Atoi(c.Param("id1"))
@@ -269,94 +217,5 @@ func StartServer() {
         	})
 		})
 
-	r.GET("/history-full/:file", func(c *gin.Context) {
-
-        	filename := c.Param("file")
-
-        	var history []models.Snapshot
-
-        	for _, snapshot := range Snapshots {
-
-                	if snapshot.File == filename {
-                        	history = append(history, snapshot)
-                	}
-        	}
-
-        	if len(history) == 0 {
-                	c.JSON(http.StatusNotFound, gin.H{
-                        	"error": "file not found",
-                	})
-                	return
-        	}
-
-        	c.JSON(http.StatusOK, history)
-	})
-
-	r.GET("/files/:name/exists", func(c *gin.Context) {
-
-        	filename := c.Param("name")
-
-        	for _, snapshot := range Snapshots {
-
-                	if snapshot.File == filename {
-
-                        	c.JSON(http.StatusOK, gin.H{
-                                	"exists": true,
-                        	})
-                        	return
-                	}
-        	}
-
-        	c.JSON(http.StatusOK, gin.H{
-                	"exists": false,
-        	})
-	})
-
-	r.GET("/snapshot-latest-id/:file", func(c *gin.Context) {
-
-        	filename := c.Param("file")
-
-        	latestID := -1
-
-        	for _, snapshot := range Snapshots {
-
-                	if snapshot.File == filename {
-                        	latestID = snapshot.ID
-                	}
-        	}
-
-        	if latestID == -1 {
-                	c.JSON(http.StatusNotFound, gin.H{
-                        	"error": "file not found",
-                	})
-                	return
-        	}
-
-        	c.JSON(http.StatusOK, gin.H{
-                	"file":      filename,
-                	"latest_id": latestID,
-        	})
-	})
-
-	r.GET("/snapshot-first-id/:file", func(c *gin.Context) {
-
-        	filename := c.Param("file")
-
-        	for _, snapshot := range Snapshots {
-
-                	if snapshot.File == filename {
-
-                        	c.JSON(http.StatusOK, gin.H{
-                                	"file":     filename,
-                                	"first_id": snapshot.ID,
-                        	})
-                        	return
-                	}
-        	}
-
-        	c.JSON(http.StatusNotFound, gin.H{
-                	"error": "file not found",
-        	})
-	})
 	r.Run(":8080")
 }

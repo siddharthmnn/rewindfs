@@ -8,7 +8,8 @@ import (
 
 
 var Snapshots []models.Snapshot
-
+var SnapshotByID = make(map[int]models.Snapshot)
+var SnapshotsByFile = make(map[string][]models.Snapshot)
 func AddSnapshot(snapshot *models.Snapshot) {
 
 	snapshot.Hash = storage.GenerateHash(
@@ -38,6 +39,13 @@ func AddSnapshot(snapshot *models.Snapshot) {
                 }
         }
 
-        Snapshots = append(Snapshots, *snapshot)
-        SaveSnapshots()
+	Snapshots = append(Snapshots, *snapshot)
+
+	SnapshotByID[snapshot.ID] = *snapshot
+
+	SnapshotsByFile[snapshot.File] =
+	        append(SnapshotsByFile[snapshot.File], *snapshot)
+
+	SaveSnapshots()
+
 }
