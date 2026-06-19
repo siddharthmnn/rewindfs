@@ -44,8 +44,9 @@ func AddSnapshot(snapshot *models.Snapshot) {
 	SnapshotByID[snapshot.ID] = *snapshot
 
 	SnapshotsByFile[snapshot.File] =
-	        append(SnapshotsByFile[snapshot.File], *snapshot)
+        	append(SnapshotsByFile[snapshot.File], *snapshot)
 
-	SaveSnapshots()
+	_ = storage.InsertSnapshot(*snapshot)
+
 
 }

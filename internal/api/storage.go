@@ -1,30 +1,29 @@
 package api
 
 import (
-	"encoding/json"
 	"rewindfs/internal/models"
-	"os"
+	"rewindfs/internal/storage"
 )
 
 func SaveSnapshots() {
-	data, _ := json.MarshalIndent(Snapshots, "", "  ")
-	_ = os.WriteFile("snapshots.json", data, 0644)
+	// SQLite is now the source of truth.
 }
 
 func LoadSnapshots() {
-        data, err := os.ReadFile("snapshots.json")
-        if err != nil {
-                return
-        }
 
-        _ = json.Unmarshal(data, &Snapshots)
+	snapshots, err := storage.LoadAllSnapshots()
+	if err != nil {
+		return
+	}
 
-        SnapshotByID = make(map[int]models.Snapshot)
-        SnapshotsByFile = make(map[string][]models.Snapshot)
+	Snapshots = snapshots
 
-        for _, snapshot := range Snapshots {
-                SnapshotByID[snapshot.ID] = snapshot
-                SnapshotsByFile[snapshot.File] =
-                        append(SnapshotsByFile[snapshot.File], snapshot)
-        }
+	SnapshotByID = make(map[int]models.Snapshot)
+	SnapshotsByFile = make(map[string][]models.Snapshot)
+
+	for _, snapshot := range Snapshots {
+		SnapshotByID[snapshot.ID] = snapshot
+		SnapshotsByFile[snapshot.File] =
+			append(SnapshotsByFile[snapshot.File], snapshot)
+	}
 }
