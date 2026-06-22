@@ -176,6 +176,9 @@ func StartServer() {
 					Snapshots[i+1:]...,
 				)
 
+				delete(SnapshotByID, id)
+
+				_ = storage.DeleteSnapshot(id)
 				SaveSnapshots()
 
 				c.JSON(http.StatusOK, gin.H{

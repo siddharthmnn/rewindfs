@@ -122,3 +122,16 @@ func LoadAllSnapshots() ([]models.Snapshot, error) {
 
         return snapshots, nil
 }
+func DeleteSnapshot(id int) error {
+
+        if DB == nil {
+                return nil
+        }
+
+        _, err := DB.Exec(
+                `DELETE FROM snapshots WHERE id = ?`,
+                id,
+        )
+
+        return err
+}
