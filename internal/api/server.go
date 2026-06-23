@@ -19,6 +19,12 @@ func StartServer() {
 	defer storage.CloseDB()
 
 	r := gin.Default()
+
+	r.Static("/frontend", "./frontend")
+
+	r.GET("/", func(c *gin.Context) {
+	    c.File("./frontend/index.html")
+	})
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
 	RegisterLookupRoutes(r)
