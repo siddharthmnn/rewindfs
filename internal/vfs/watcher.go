@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"rewindfs/internal/api"
 	"rewindfs/internal/models"
-	"github.com/fsnotify/fsnotify"
 )
 
 var lastSnapshotTime = make(map[string]time.Time)
@@ -40,16 +40,15 @@ func StartWatcher(path string) {
 				file := filepath.Base(event.Name)
 
 				switch file {
-					case "snapshots.json",
-        				"rewindfs.db",
-        				"rewindfs.db-journal":
-        				continue
+				case "snapshots.json",
+					"rewindfs.db",
+					"rewindfs.db-journal":
+					continue
 				}
 
 				if filepath.Ext(file) == ".db" {
-        				continue
+					continue
 				}
-
 
 				if t, exists := lastSnapshotTime[file]; exists {
 					if time.Since(t) < 3*time.Second {
@@ -66,8 +65,8 @@ func StartWatcher(path string) {
 				}
 
 				snapshot := models.Snapshot{
-        				File:      file,
-        				Content:   string(content),
+					File:    file,
+					Content: string(content),
 				}
 
 				api.AddSnapshot(&snapshot)

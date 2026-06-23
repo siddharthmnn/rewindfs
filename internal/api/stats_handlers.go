@@ -26,8 +26,8 @@ func RegisterStatsRoutes(r *gin.Engine) {
 
 		c.JSON(http.StatusOK, gin.H{
 			"total_snapshots": len(Snapshots),
-			"tracked_files":  len(filesMap),
-			"unique_hashes":  len(hashMap),
+			"tracked_files":   len(filesMap),
+			"unique_hashes":   len(hashMap),
 		})
 	})
 
@@ -43,7 +43,7 @@ func RegisterStatsRoutes(r *gin.Engine) {
 			filesMap[snapshot.File] = true
 		}
 
-		var files []string
+		files := []string{}
 
 		for file := range filesMap {
 			files = append(files, file)

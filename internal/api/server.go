@@ -1,19 +1,19 @@
 package api
 
 import (
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
-	"strconv"
 	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
 	"rewindfs/internal/storage"
-	"github.com/gin-gonic/gin"
+	"strconv"
 )
 
 func StartServer() {
 
 	if err := storage.InitDB(); err != nil {
-        	panic(err)
+		panic(err)
 	}
 
 	defer storage.CloseDB()
@@ -23,87 +23,87 @@ func StartServer() {
 	r.Static("/frontend", "./frontend")
 
 	r.GET("/", func(c *gin.Context) {
-	    c.File("./frontend/index.html")
+		c.File("./frontend/index.html")
 	})
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
 	RegisterLookupRoutes(r)
 	r.Use(func(c *gin.Context) {
-	    c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-	    c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	    c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
 
-	    if c.Request.Method == "OPTIONS" {
-	        c.AbortWithStatus(204)
-	        return
-	    }
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
 
-	    c.Next()
+		c.Next()
 	})
 	LoadSnapshots()
-	
-		r.GET("/diff/:id1/:id2", func(c *gin.Context) {
 
-        	id1, err := strconv.Atoi(c.Param("id1"))
-        	if err != nil {
-                	c.JSON(http.StatusBadRequest, gin.H{
-                        	"error": "invalid snapshot id",
-                	})
-                	return
-        	}
+	r.GET("/diff/:id1/:id2", func(c *gin.Context) {
 
-        	id2, err := strconv.Atoi(c.Param("id2"))
-        	if err != nil {
-                	c.JSON(http.StatusBadRequest, gin.H{
-                	        "error": "invalid snapshot id",
-                	})
-                	return
-        	}
+		id1, err := strconv.Atoi(c.Param("id1"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid snapshot id",
+			})
+			return
+		}
 
-        	var snap1 models.Snapshot
-        	var snap2 models.Snapshot
+		id2, err := strconv.Atoi(c.Param("id2"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid snapshot id",
+			})
+			return
+		}
 
-        	found1 := false
-        	found2 := false
+		var snap1 models.Snapshot
+		var snap2 models.Snapshot
 
-        	for _, snapshot := range Snapshots {
+		found1 := false
+		found2 := false
 
-                	if snapshot.ID == id1 {
-                        	snap1 = snapshot
-                        	found1 = true
-                	}
+		for _, snapshot := range Snapshots {
 
-                	if snapshot.ID == id2 {
-                	        snap2 = snapshot
-                	        found2 = true
-                	}
-        	}
+			if snapshot.ID == id1 {
+				snap1 = snapshot
+				found1 = true
+			}
 
-        	if !found1 || !found2 {
-                	c.JSON(http.StatusNotFound, gin.H{
-                        	"error": "snapshot not found",
-                	})
-        	        return
-        	}
+			if snapshot.ID == id2 {
+				snap2 = snapshot
+				found2 = true
+			}
+		}
+
+		if !found1 || !found2 {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "snapshot not found",
+			})
+			return
+		}
 
 		diffResult := diff.Compare(
-        		snap1.Content,
-        		snap2.Content,
+			snap1.Content,
+			snap2.Content,
 		)
 
-        	c.JSON(http.StatusOK, gin.H{
-        		"snapshot1": id1,
-        		"snapshot2": id2,
-        		"same":      snap1.Content == snap2.Content,
-			"diff": diffResult,
-        		"file1": snap1.File,
-        		"file2": snap2.File,
+		c.JSON(http.StatusOK, gin.H{
+			"snapshot1": id1,
+			"snapshot2": id2,
+			"same":      snap1.Content == snap2.Content,
+			"diff":      diffResult,
+			"file1":     snap1.File,
+			"file2":     snap2.File,
 
-        		"content1": snap1.Content,
-        		"content2": snap2.Content,
+			"content1": snap1.Content,
+			"content2": snap2.Content,
 
-        		"length1": len(snap1.Content),
-        		"length2": len(snap2.Content),
+			"length1": len(snap1.Content),
+			"length2": len(snap2.Content),
 		})
 	})
 	r.POST("/snapshot", func(c *gin.Context) {
@@ -201,37 +201,49 @@ func StartServer() {
 	})
 	r.POST("/recover/:file", func(c *gin.Context) {
 
-  	      filename := c.Param("file")
+		filename := c.Param("file")
 
-        	for i := len(Snapshots) - 1; i >= 0; i-- {
+		for i := len(Snapshots) - 1; i >= 0; i-- {
 
-                	if Snapshots[i].File == filename {
+			if Snapshots[i].File == filename {
 
-                        	err := os.WriteFile(
-                                	filename,
-                                	[]byte(Snapshots[i].Content),
-                                	0644,
-                        	)
+				err := os.WriteFile(
+					filename,
+					[]byte(Snapshots[i].Content),
+					0644,
+				)
 
-                        	if err != nil {
-                                	c.JSON(http.StatusInternalServerError, gin.H{
-                                        	"error": err.Error(),
-                                	})
-                                	return
-                        	}
+				if err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"error": err.Error(),
+					})
+					return
+				}
 
-                        	c.JSON(http.StatusOK, gin.H{
-                                	"message": "file recovered",
-                        	})
+				c.JSON(http.StatusOK, gin.H{
+					"message": "file recovered",
+				})
 
-                        	return
-                	}
-        	}
+				return
+			}
+		}
 
-        	c.JSON(http.StatusNotFound, gin.H{
-                	"error": "no snapshot found",
-        	})
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "no snapshot found",
 		})
+	})
+	r.GET("/debug-db", func(c *gin.Context) {
 
+		snapshots, err := storage.LoadAllSnapshots()
+
+		if err != nil {
+			c.JSON(500, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(200, snapshots)
+	})
 	r.Run(":8080")
 }

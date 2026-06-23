@@ -2,37 +2,172 @@
 <html>
 <head>
     <title>RewindFS Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:'Inter',sans-serif;
+    background:#ffffff;
+    color:#111111;
+    max-width:1200px;
+    margin:auto;
+    padding:40px 20px;
+    line-height:1.6;
+}
+
+h1{
+    text-align:center;
+    font-size:3rem;
+    font-weight:700;
+    margin-bottom:40px;
+    letter-spacing:-2px;
+}
+
+h2{
+    font-size:1.5rem;
+    margin-bottom:16px;
+    font-weight:600;
+}
+
+.section{
+    background:#ffffff;
+    border:1px solid #e5e5e5;
+    border-radius:16px;
+    padding:24px;
+    margin-bottom:24px;
+    transition:0.2s ease;
+}
+
+.section:hover{
+    box-shadow:0 8px 24px rgba(0,0,0,0.08);
+}
+
+ul{
+    list-style:none;
+}
+
+li{
+    margin-bottom:10px;
+}
+
+a{
+    color:#111111;
+    text-decoration:none;
+    font-weight:500;
+}
+
+a:hover{
+    text-decoration:underline;
+}
+
+button{
+    background:#111111;
+    color:white;
+    border:none;
+    padding:12px 18px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:14px;
+    font-weight:600;
+    transition:0.2s ease;
+}
+
+button:hover{
+    background:#000000;
+    transform:translateY(-1px);
+}
+
+pre{
+    background:#f7f7f7;
+    border:1px solid #e5e5e5;
+    border-radius:12px;
+    padding:16px;
+    overflow-x:auto;
+    white-space:pre-wrap;
+    word-wrap:break-word;
+}
+
+#stats{
+    font-size:18px;
+}
+
+#fileInfo,
+#history,
+#snapshotContent,
+#diffViewer{
+    min-height:80px;
+}
+
+.snapshot-link{
+    display:block;
+    padding:10px;
+    border-radius:8px;
+    margin-bottom:8px;
+    background:#fafafa;
+}
+
+.snapshot-link:hover{
+    background:#f0f0f0;
+}
+</style>
 </head>
 <body>
 
     <h1>RewindFS Dashboard</h1>
+	<button onclick="refreshDashboard()">
+    	Refresh Dashboard
+	</button>
+    <div class="section">
+        <h2>Stats</h2>
+    	<div id="stats">Loading...</div>
+	</div>
 
-    <h2>Stats</h2>
-    <div id="stats">Loading...</div>
-
+    <div class="section">
     <h2>Files</h2>
     <ul id="files"></ul>
-	
-	<h2>File Info</h2>
-	<div id="fileInfo">
-	    Click a file...
-	</div>
-	
-	<h2>History</h2>
-	<div id="history">
-    		Click a file...
-	</div>
-	
-	<h2>Snapshot Content</h2>
-	<div id="snapshotContent">
-    		Click a snapshot...
-	</div>
-	<button onclick="restoreSelectedSnapshot()">
-        	Restore Snapshot
+</div>
+
+<div class="section">
+    <h2>File Info</h2>
+    <div id="fileInfo">
+        Click a file...
+    </div>
+</div>
+
+<div class="section">
+    <h2>History</h2>
+    <div id="history">
+        Click a file...
+    </div>
+</div>
+
+<div class="section">
+    <h2>Snapshot Content</h2>
+    <div id="snapshotContent">
+        Click a snapshot...
+    </div>
+
+    <br>
+
+    <button onclick="restoreSelectedSnapshot()">
+        Restore Snapshot
+    </button>
+	<button onclick="deleteSelectedSnapshot()">
+    	Delete Snapshot
 	</button>
-	<h2>Diff Viewer</h2>
-	<div id="diffViewer">
-    		Select two snapshots...
+</div>
+
+	<div class="section">
+    	<h2>Diff Viewer</h2>
+    	<div id="diffViewer">
+        	Select two snapshots...
+    	</div>
 	</div>
     <script>
 
@@ -58,11 +193,14 @@
 
 		historyData.forEach(snapshot => {
         		historyHtml += `
-                		<a href="#" onclick="loadSnapshot(${snapshot.id})">
-                		        Snapshot ID: ${snapshot.id}
-                		</a><br>
-                		Created: ${snapshot.created_at}<br><br>
-        		`;
+				<div class="snapshot-link">
+    				<a href="#" onclick="loadSnapshot(${snapshot.id})">
+        				Snapshot #${snapshot.id}
+    				</a>
+    				<br>
+    				<small>${snapshot.created_at}</small>
+				</div>
+				`;
 		});
 
 		document.getElementById("history").innerHTML = historyHtml;
@@ -71,6 +209,12 @@
 
 	async function loadSnapshot(id) {
 
+		if (!id) {
+        	console.log("Invalid snapshot id");
+        	return;
+    	}
+
+			console.log("LOAD SNAPSHOT:", id);
         	const response = await fetch(`http://localhost:8080/snapshot/${id}`);
         	const snapshot = await response.json();
 		currentSnapshotId = id;		
@@ -124,6 +268,37 @@
 
         	alert(JSON.stringify(data));
 	}
+	async function deleteSelectedSnapshot() {
+
+    if (currentSnapshotId === null) {
+        alert("Select a snapshot first");
+        return;
+    }
+
+    const response = await fetch(
+        `http://localhost:8080/snapshot/${currentSnapshotId}`,
+        {
+            method: "DELETE"
+        }
+    );
+
+    const data = await response.json();
+
+alert(JSON.stringify(data));
+
+currentSnapshotId = null;
+
+document.getElementById("snapshotContent").innerHTML =
+    "Click a snapshot...";
+
+document.getElementById("diffViewer").innerHTML =
+    "Select two snapshots...";
+
+selectedSnapshot1 = null;
+selectedSnapshot2 = null;
+
+await refreshDashboard();
+}
 
         async function loadStats() {
             const response = await fetch("http://localhost:8080/stats");
@@ -137,24 +312,39 @@
                 `;
         }
 
-        async function loadFiles() {
-            const response = await fetch("http://localhost:8080/files");
-            const data = await response.json();
+async function loadFiles() {
 
-            const filesList = document.getElementById("files");
+    const response = await fetch("http://localhost:8080/files");
+    const data = await response.json();
 
-            data.files.forEach(file => {
-                const li = document.createElement("li");
-                li.innerHTML = `
-    			<a href="#" onclick="loadFileInfo('${file}')">
-        			${file}
-    			</a>
-			`;
+    const filesList = document.getElementById("files");
+    filesList.innerHTML = "";
 
-		filesList.appendChild(li);
-            });
-        }
+    if (!data.files || data.files.length === 0) {
+        filesList.innerHTML = "<li>No tracked files</li>";
+        return;
+    }
 
+    data.files.forEach(file => {
+
+        const li = document.createElement("li");
+
+        li.innerHTML = `
+            <a href="#" onclick="loadFileInfo('${file}')">
+                ${file}
+            </a>
+        `;
+
+        filesList.appendChild(li);
+    });
+}
+		async function refreshDashboard() {
+
+    		document.getElementById("files").innerHTML = "";
+
+    		await loadStats();
+    		await loadFiles();
+		}
         loadStats();
         loadFiles();
     </script>
