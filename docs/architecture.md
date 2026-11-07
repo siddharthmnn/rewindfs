@@ -11,8 +11,8 @@ An earlier `backend/` directory contained a separate Go module, a second SQLite 
 ## Runtime flow
 
 1. `main.go` calls `api.Initialize`, which opens the configured SQLite database and loads persisted snapshots.
-2. Only after initialization succeeds, the filesystem watcher starts. The Gin server then begins accepting HTTP requests.
-3. `internal/vfs` reads changed file content and submits it through the API's snapshot entry point.
+2. Only after initialization succeeds, the recursive filesystem watcher starts. It watches directories under the selected root and skips Git metadata, Node dependencies, and common SQLite/runtime files.
+3. The watcher debounces create/write/rename events, reads the settled file, and submits it using a slash-separated path relative to the watch root.
 4. `internal/api` maps HTTP requests to the snapshot service. `internal/snapshot` validates the file key, calculates the SHA-256 hash, checks the latest version for duplicates, and coordinates persistence.
 5. `internal/storage` owns a `Store` instance. It applies schema migrations transactionally, inserts new snapshot rows, and returns the ID assigned by SQLite. The service updates its in-memory indexes only after the insert succeeds.
 6. The dashboard in `frontend/` reads snapshot, history, statistics, and diff data through the HTTP API.
@@ -78,7 +78,6 @@ The current schema stores file path, content, hash, and creation time in the sam
 
 The current implementation is a working prototype, not yet a hardened filesystem service. Remaining limitations include:
 
-- The watcher monitors only the path passed to it, does not recurse into subdirectories, and identifies files by basename.
 - Restore and recovery do not yet enforce a configured filesystem root.
 - The current diff implementation reports changed content as whole old/new strings.
 - The dashboard interpolates API data into HTML and needs safe DOM rendering.

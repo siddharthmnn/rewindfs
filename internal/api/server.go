@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"rewindfs/internal/diff"
@@ -17,6 +20,22 @@ func StartServer() {
 		panic(err)
 	}
 	defer Close()
+
+	if err := StartServerContext(context.Background()); err != nil {
+		panic(err)
+	}
+}
+
+// StartServerContext serves HTTP requests until the context is cancelled or
+// the server stops unexpectedly. The caller owns application shutdown so the
+// filesystem watcher can finish its pending work before SQLite is closed.
+func StartServerContext(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("server context must not be nil")
+	}
+	if err := Initialize(); err != nil {
+		return err
+	}
 
 	r := gin.Default()
 	r.Static("/frontend", "./frontend")
@@ -157,7 +176,36 @@ func StartServer() {
 		c.JSON(http.StatusOK, snapshotService.All())
 	})
 
-	if err := r.Run(":8080"); err != nil {
-		panic(err)
+	server := &http.Server{
+		Addr:              ":8080",
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return err
+	}
+
+	serverErrors := make(chan error, 1)
+	go func() {
+		err := server.Serve(listener)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+			return err
+		}
+		return nil
+
+	case err := <-serverErrors:
+		return err
 	}
 }
