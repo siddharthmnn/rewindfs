@@ -22,18 +22,21 @@ The current implementation is a learning project built around Go, SQLite, and fs
 
 ## Current progress
 
-The repository has a working Go API, SQLite persistence, a filesystem watcher, snapshot hashing, basic history and lookup endpoints, and a browser dashboard.
+The repository has a Go API, SQLite persistence, a filesystem watcher, a dedicated snapshot service, basic history and lookup endpoints, and a browser dashboard.
 
-The feature list below describes the current implementation, not a claim that every path is production-ready. Error handling, concurrent access, watcher behavior, and restore safety still need work.
+The feature list below describes the current implementation, not a claim that every path is production-ready. Watcher behavior, API validation, restore safety, and broader integration coverage still need work.
 
 ### Working foundation
 
 - [x] Go application and Gin HTTP server
 - [x] Filesystem watcher using fsnotify
-- [x] Snapshot creation through the API
+- [x] Snapshot creation through the API and watcher
 - [x] SQLite schema initialization and snapshot persistence
+- [x] Database-assigned snapshot IDs
 - [x] Snapshot timestamps and SHA-256 hashes
 - [x] Consecutive duplicate snapshot detection
+- [x] Thread-safe snapshot service and in-memory indexes
+- [x] Persistence errors surfaced to callers
 - [x] Snapshot lookup, listing, and deletion endpoints
 - [x] Basic file history and latest/oldest snapshot lookups
 - [x] Snapshot comparison endpoint
@@ -44,8 +47,6 @@ The feature list below describes the current implementation, not a claim that ev
 
 ### Still to do
 
-- [ ] Make snapshot creation and deletion reliable under concurrent requests.
-- [ ] Propagate storage failures instead of silently ignoring them.
 - [ ] Make watcher paths relative to a configured root and support nested directories.
 - [ ] Restrict restore and recovery paths to the watched root.
 - [ ] Improve diff output beyond whole-content replacement.
@@ -60,18 +61,19 @@ The feature list below describes the current implementation, not a claim that ev
 
 ## Architecture
 
-The root Go module is the application that is built and run. Its entry point starts the filesystem watcher and HTTP API.
+The root Go module is the application that is built and run. Startup initializes SQLite and loads existing snapshots before the filesystem watcher begins processing events.
 
-- `internal/api` registers HTTP routes and maintains the in-memory snapshot indexes used by the handlers.
+- `internal/api` registers HTTP routes and maps requests to snapshot service operations.
+- `internal/snapshot` owns snapshot creation, hashing, duplicate detection, ID handling through the repository, deletion, and thread-safe in-memory indexes.
 - `internal/models` defines the snapshot data model.
-- `internal/storage` handles SQLite persistence and SHA-256 hashing.
+- `internal/storage` persists snapshot records in SQLite.
 - `internal/vfs` watches the configured filesystem path and submits changes for snapshotting.
 - `internal/diff` compares snapshot content.
 - `frontend` contains the browser dashboard served by the API.
 
-See [docs/architecture.md](docs/architecture.md) for the current data flow, package responsibilities, and the design decisions guiding the next iterations.
+See [docs/architecture.md](docs/architecture.md) for the runtime flow, package responsibilities, and known limitations.
 
-SQLite currently stores snapshot metadata and content together. Content-addressed blob storage is not part of the active application yet.
+SQLite stores snapshot metadata and content together. Content-addressed blob storage is not part of the active application yet.
 
 ---
 
@@ -101,7 +103,7 @@ The server listens on port `8080`.
 | POST | `/recover/:file` | Recover a file from its latest snapshot |
 | GET | `/diff/:id1/:id2` | Compare two snapshots |
 
-These endpoints are still being hardened. In particular, restore/recovery path validation and consistent error handling are planned work.
+Restore/recovery path validation and consistent API error handling are still being hardened.
 
 ### Create a snapshot
 

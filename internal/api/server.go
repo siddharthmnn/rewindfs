@@ -1,249 +1,169 @@
 package api
 
 import (
-	"github.com/gin-gonic/gin"
+	"errors"
 	"net/http"
 	"os"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
 	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
+	"rewindfs/internal/snapshot"
 	"rewindfs/internal/storage"
-	"strconv"
 )
 
 func StartServer() {
-
-	if err := storage.InitDB(); err != nil {
+	if err := Initialize(); err != nil {
 		panic(err)
 	}
-
 	defer storage.CloseDB()
 
 	r := gin.Default()
-
 	r.Static("/frontend", "./frontend")
 
 	r.GET("/", func(c *gin.Context) {
 		c.File("./frontend/index.html")
 	})
+
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
 	RegisterLookupRoutes(r)
+
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
 
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
-
 		c.Next()
 	})
-	LoadSnapshots()
 
 	r.GET("/diff/:id1/:id2", func(c *gin.Context) {
-
 		id1, err := strconv.Atoi(c.Param("id1"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid snapshot id",
-			})
+		if err != nil || id1 <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot id"})
 			return
 		}
 
 		id2, err := strconv.Atoi(c.Param("id2"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid snapshot id",
-			})
+		if err != nil || id2 <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot id"})
 			return
 		}
 
-		var snap1 models.Snapshot
-		var snap2 models.Snapshot
-
-		found1 := false
-		found2 := false
-
-		for _, snapshot := range Snapshots {
-
-			if snapshot.ID == id1 {
-				snap1 = snapshot
-				found1 = true
-			}
-
-			if snapshot.ID == id2 {
-				snap2 = snapshot
-				found2 = true
-			}
-		}
-
+		snap1, found1 := snapshotService.Get(id1)
+		snap2, found2 := snapshotService.Get(id2)
 		if !found1 || !found2 {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error": "snapshot not found",
-			})
+			c.JSON(http.StatusNotFound, gin.H{"error": "snapshot not found"})
 			return
 		}
-
-		diffResult := diff.Compare(
-			snap1.Content,
-			snap2.Content,
-		)
 
 		c.JSON(http.StatusOK, gin.H{
 			"snapshot1": id1,
 			"snapshot2": id2,
 			"same":      snap1.Content == snap2.Content,
-			"diff":      diffResult,
+			"diff":      diff.Compare(snap1.Content, snap2.Content),
 			"file1":     snap1.File,
 			"file2":     snap2.File,
-
-			"content1": snap1.Content,
-			"content2": snap2.Content,
-
-			"length1": len(snap1.Content),
-			"length2": len(snap2.Content),
+			"content1":  snap1.Content,
+			"content2":  snap2.Content,
+			"length1":   len(snap1.Content),
+			"length2":   len(snap2.Content),
 		})
 	})
+
 	r.POST("/snapshot", func(c *gin.Context) {
-
-		var snapshot models.Snapshot
-
-		if err := c.BindJSON(&snapshot); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": err.Error(),
-			})
+		var request models.Snapshot
+		if err := c.ShouldBindJSON(&request); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot payload"})
 			return
 		}
 
-		AddSnapshot(&snapshot)
+		created, err := AddSnapshot(&request)
+		if err != nil {
+			if errors.Is(err, snapshot.ErrInvalidFile) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist snapshot"})
+			return
+		}
 
-		c.JSON(http.StatusCreated, snapshot)
+		status := http.StatusCreated
+		if !created {
+			status = http.StatusOK
+		}
+		c.JSON(status, request)
 	})
 
 	r.POST("/restore/:id", func(c *gin.Context) {
-
 		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid snapshot id",
-			})
+		if err != nil || id <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot id"})
 			return
 		}
 
-		for _, snapshot := range Snapshots {
-
-			if snapshot.ID == id {
-
-				err := os.WriteFile(
-					snapshot.File,
-					[]byte(snapshot.Content),
-					0644,
-				)
-
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"error": err.Error(),
-					})
-					return
-				}
-
-				c.JSON(http.StatusOK, gin.H{
-					"message":  "restored",
-					"snapshot": id,
-				})
-
-				return
-			}
+		item, exists := snapshotService.Get(id)
+		if !exists {
+			c.JSON(http.StatusNotFound, gin.H{"error": "snapshot not found"})
+			return
 		}
 
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "snapshot not found",
-		})
+		if err := os.WriteFile(item.File, []byte(item.Content), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "restored", "snapshot": id})
 	})
 
 	r.DELETE("/snapshot/:id", func(c *gin.Context) {
-
 		id, err := strconv.Atoi(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "invalid snapshot id",
-			})
+		if err != nil || id <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot id"})
 			return
 		}
 
-		for i, snapshot := range Snapshots {
-
-			if snapshot.ID == id {
-
-				Snapshots = append(
-					Snapshots[:i],
-					Snapshots[i+1:]...,
-				)
-
-				delete(SnapshotByID, id)
-
-				_ = storage.DeleteSnapshot(id)
-				SaveSnapshots()
-
-				c.JSON(http.StatusOK, gin.H{
-					"message": "snapshot deleted",
-				})
-
+		if err := snapshotService.Delete(id); err != nil {
+			if errors.Is(err, snapshot.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "snapshot not found"})
 				return
 			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete snapshot"})
+			return
 		}
-
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "snapshot not found",
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "snapshot deleted"})
 	})
+
 	r.POST("/recover/:file", func(c *gin.Context) {
-
 		filename := c.Param("file")
-
-		for i := len(Snapshots) - 1; i >= 0; i-- {
-
-			if Snapshots[i].File == filename {
-
-				err := os.WriteFile(
-					filename,
-					[]byte(Snapshots[i].Content),
-					0644,
-				)
-
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{
-						"error": err.Error(),
-					})
-					return
-				}
-
-				c.JSON(http.StatusOK, gin.H{
-					"message": "file recovered",
-				})
-
-				return
-			}
-		}
-
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "no snapshot found",
-		})
-	})
-	r.GET("/debug-db", func(c *gin.Context) {
-
-		snapshots, err := storage.LoadAllSnapshots()
-
-		if err != nil {
-			c.JSON(500, gin.H{
-				"error": err.Error(),
-			})
+		history := snapshotService.ByFile(filename)
+		if len(history) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no snapshot found"})
 			return
 		}
 
-		c.JSON(200, snapshots)
+		latest := history[len(history)-1]
+		if err := os.WriteFile(filename, []byte(latest.Content), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "file recovered", "snapshot": latest.ID})
 	})
-	r.Run(":8080")
+
+	r.GET("/debug-db", func(c *gin.Context) {
+		items, err := storage.LoadAllSnapshots()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, items)
+	})
+
+	if err := r.Run(":8080"); err != nil {
+		panic(err)
+	}
 }
