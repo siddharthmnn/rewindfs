@@ -24,12 +24,15 @@ The current implementation is a learning project built around Go, SQLite, and fs
 
 The repository has a Go API, SQLite persistence, a filesystem watcher, a dedicated snapshot service, basic history and lookup endpoints, and a browser dashboard.
 
-The feature list below describes the current implementation, not a claim that every path is production-ready. Watcher behavior, API validation, restore safety, and broader integration coverage still need work.
+The feature list below describes the current implementation, not a claim that every path is production-ready. API validation, restore safety, and broader integration coverage still need work.
 
 ### Working foundation
 
 - [x] Go application and Gin HTTP server
-- [x] Filesystem watcher using fsnotify
+- [x] Recursive filesystem watcher using fsnotify
+- [x] Relative snapshot paths and debounced file events
+- [x] Handles new directories and common atomic-save rename events
+- [x] Graceful watcher and HTTP server shutdown
 - [x] Snapshot creation through the API and watcher
 - [x] Versioned SQLite schema initialization
 - [x] Transactional schema initialization and migration
@@ -51,11 +54,10 @@ The feature list below describes the current implementation, not a claim that ev
 
 ### Still to do
 
-- [ ] Make watcher paths relative to a configured root and support nested directories.
 - [ ] Restrict restore and recovery paths to the watched root.
 - [ ] Improve diff output beyond whole-content replacement.
 - [ ] Finish dashboard history, restore, delete, and error states.
-- [ ] Add integration tests for the API, watcher, and recovery paths.
+- [ ] Add broader integration tests for the API and recovery paths.
 - [ ] Add metadata indexing and snapshot search.
 - [ ] Add a CLI.
 - [ ] Support directory rollback and multiple watch roots.
