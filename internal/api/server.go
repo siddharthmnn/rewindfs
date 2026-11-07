@@ -10,14 +10,13 @@ import (
 	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
 	"rewindfs/internal/snapshot"
-	"rewindfs/internal/storage"
 )
 
 func StartServer() {
 	if err := Initialize(); err != nil {
 		panic(err)
 	}
-	defer storage.CloseDB()
+	defer Close()
 
 	r := gin.Default()
 	r.Static("/frontend", "./frontend")
@@ -155,12 +154,7 @@ func StartServer() {
 	})
 
 	r.GET("/debug-db", func(c *gin.Context) {
-		items, err := storage.LoadAllSnapshots()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, items)
+		c.JSON(http.StatusOK, snapshotService.All())
 	})
 
 	if err := r.Run(":8080"); err != nil {

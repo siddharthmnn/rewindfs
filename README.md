@@ -31,11 +31,15 @@ The feature list below describes the current implementation, not a claim that ev
 - [x] Go application and Gin HTTP server
 - [x] Filesystem watcher using fsnotify
 - [x] Snapshot creation through the API and watcher
-- [x] SQLite schema initialization and snapshot persistence
+- [x] Versioned SQLite schema initialization
+- [x] Transactional schema initialization and migration
 - [x] Database-assigned snapshot IDs
 - [x] Snapshot timestamps and SHA-256 hashes
 - [x] Consecutive duplicate snapshot detection
 - [x] Thread-safe snapshot service and in-memory indexes
+- [x] Explicit SQLite store lifecycle and configurable database path
+- [x] WAL journaling and a bounded SQLite busy timeout
+- [x] Isolated storage tests using temporary databases
 - [x] Persistence errors surfaced to callers
 - [x] Snapshot lookup, listing, and deletion endpoints
 - [x] Basic file history and latest/oldest snapshot lookups
@@ -61,12 +65,12 @@ The feature list below describes the current implementation, not a claim that ev
 
 ## Architecture
 
-The root Go module is the application that is built and run. Startup initializes SQLite and loads existing snapshots before the filesystem watcher begins processing events.
+The root Go module is the application that is built and run. Startup opens the configured SQLite database and loads existing snapshots before the filesystem watcher begins processing events.
 
 - `internal/api` registers HTTP routes and maps requests to snapshot service operations.
 - `internal/snapshot` owns snapshot creation, hashing, duplicate detection, ID handling through the repository, deletion, and thread-safe in-memory indexes.
 - `internal/models` defines the snapshot data model.
-- `internal/storage` persists snapshot records in SQLite.
+- `internal/storage` owns SQLite connections, schema migrations, and snapshot persistence.
 - `internal/vfs` watches the configured filesystem path and submits changes for snapshotting.
 - `internal/diff` compares snapshot content.
 - `frontend` contains the browser dashboard served by the API.
@@ -141,9 +145,15 @@ Run the test suite from the same directory:
 go test ./...
 ```
 
-The application uses SQLite through `github.com/mattn/go-sqlite3`, which requires CGO and a C compiler in environments where the driver is built from source.
+The database defaults to `./rewindfs.db` for compatibility with existing installations. Set `REWINDFS_DB_PATH` to use an explicit location:
 
-The database is created at `rewindfs.db` relative to the process working directory. It is runtime data and should not be committed.
+```bash
+REWINDFS_DB_PATH="$HOME/.local/share/rewindfs/rewindfs.db" go run .
+```
+
+SQLite uses WAL journaling and a five-second busy timeout. The schema is versioned with SQLite's `user_version` pragma and migrations run inside a transaction. Existing databases are upgraded in place without replacing their snapshot rows.
+
+The application uses SQLite through `github.com/mattn/go-sqlite3`, which requires CGO and a C compiler in environments where the driver is built from source.
 
 ---
 
