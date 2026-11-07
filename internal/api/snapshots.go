@@ -2,50 +2,42 @@ package api
 
 import (
 	"rewindfs/internal/models"
+	"rewindfs/internal/snapshot"
 	"rewindfs/internal/storage"
-	"time"
 )
 
-var Snapshots []models.Snapshot
-var SnapshotByID = make(map[int]models.Snapshot)
-var SnapshotsByFile = make(map[string][]models.Snapshot)
+type sqliteSnapshotRepository struct{}
 
-func AddSnapshot(snapshot *models.Snapshot) {
+func (sqliteSnapshotRepository) InsertSnapshot(item models.Snapshot) (int, error) {
+	return storage.InsertSnapshot(item)
+}
 
-	snapshot.Hash = storage.GenerateHash(
-		[]byte(snapshot.Content),
-	)
-	snapshot.CreatedAt = time.Now()
+func (sqliteSnapshotRepository) LoadAllSnapshots() ([]models.Snapshot, error) {
+	return storage.LoadAllSnapshots()
+}
 
-	maxID := 0
+func (sqliteSnapshotRepository) DeleteSnapshot(id int) error {
+	return storage.DeleteSnapshot(id)
+}
 
-	for _, s := range Snapshots {
-		if s.ID > maxID {
-			maxID = s.ID
-		}
+var snapshotService = snapshot.NewService(sqliteSnapshotRepository{})
+
+func initializeSnapshotService() error {
+	return snapshotService.Load()
+}
+
+// AddSnapshot keeps the watcher-facing API small while the snapshot service
+// owns hashing, duplicate detection, persistence, and indexing.
+func AddSnapshot(item *models.Snapshot) (bool, error) {
+	if item == nil {
+		return false, snapshot.ErrInvalidFile
 	}
 
-	snapshot.ID = maxID + 1
-
-	for i := len(Snapshots) - 1; i >= 0; i-- {
-
-		if Snapshots[i].File == snapshot.File {
-
-			if Snapshots[i].Hash == snapshot.Hash {
-				return
-			}
-
-			break
-		}
+	created, added, err := snapshotService.Create(item.File, item.Content)
+	if err != nil {
+		return false, err
 	}
 
-	Snapshots = append(Snapshots, *snapshot)
-
-	SnapshotByID[snapshot.ID] = *snapshot
-
-	SnapshotsByFile[snapshot.File] =
-		append(SnapshotsByFile[snapshot.File], *snapshot)
-
-	_ = storage.InsertSnapshot(*snapshot)
-
+	*item = created
+	return added, nil
 }
