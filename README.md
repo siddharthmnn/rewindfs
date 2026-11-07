@@ -2,264 +2,122 @@
 
 🚧 Work in Progress
 
-rewindfs is a Git-inspired virtual filesystem project focused on snapshot-based file versioning, rollback, recovery, history tracking, deduplication, and persistent storage.
+rewindfs is a small, Git-inspired filesystem versioning project. It watches files, stores snapshots, and exposes history, comparison, and recovery operations through an HTTP API.
 
-The project explores how modern version-control systems and snapshot-oriented filesystems manage historical file state through automatic snapshot creation, content hashing, recovery workflows, REST APIs, and persistent metadata storage.
+The current implementation is a learning project built around Go, SQLite, and fsnotify. The focus is on getting the snapshot lifecycle and storage behavior right before adding more features.
 
 ---
 
 ## Goals
 
-* Track file changes over time
-* Create snapshots automatically
-* Persist snapshots across application restarts
-* Restore previous versions of files
-* Recover deleted files
-* Compare changes between snapshots
-* Reduce duplicate storage using content hashing
-* Explore filesystem and storage design concepts
-* Build maintainable backend architecture
-* Implement automated testing and CI/CD
-* Build a web dashboard for snapshot visualization
+- Track file changes over time.
+- Create snapshots when watched files change.
+- Keep snapshot metadata across restarts.
+- Restore an earlier version of a file.
+- Recover files from their latest stored snapshot.
+- Compare snapshots and inspect file history.
+- Avoid storing the same consecutive file version more than once.
 
 ---
 
-## Current Progress
+## Current progress
 
-* [x] Repository setup
-* [x] Filesystem watcher
-* [x] Automatic snapshot generation
-* [x] Snapshot persistence
-* [x] Migration from JSON storage to SQLite
-* [x] SQLite database initialization
-* [x] Snapshot timestamps
-* [x] Snapshot lookup API
-* [x] Snapshot restore API
-* [x] Snapshot delete API
-* [x] Snapshot statistics API
-* [x] Deleted file recovery API
-* [x] Latest snapshot lookup API
-* [x] Oldest snapshot lookup API
-* [x] File history API
-* [x] Full snapshot history API
-* [x] Snapshot count API
-* [x] File existence API
-* [x] Snapshot comparison API
-* [x] SHA256 content hashing
-* [x] Duplicate snapshot prevention
-* [x] Automated unit tests
-* [x] GitHub Actions CI pipeline
-* [x] API route modularization
-* [x] SQLite persistence tests
-* [x] Frontend dashboard
-* [x] Dashboard statistics panel
-* [x] Dashboard file listing
-* [ ] Snapshot history dashboard
-* [ ] Snapshot restore dashboard actions
-* [ ] Snapshot delete dashboard actions
-* [ ] Metadata indexing
-* [ ] CLI interface
-* [ ] Recovery testing
-* [ ] Folder rollback
-* [ ] Snapshot search
-* [ ] Multi-directory monitoring
+The repository has a working Go API, SQLite persistence, a filesystem watcher, snapshot hashing, basic history and lookup endpoints, and a browser dashboard.
+
+The feature list below describes the current implementation, not a claim that every path is production-ready. Error handling, concurrent access, watcher behavior, and restore safety still need work.
+
+### Working foundation
+
+- [x] Go application and Gin HTTP server
+- [x] Filesystem watcher using fsnotify
+- [x] Snapshot creation through the API
+- [x] SQLite schema initialization and snapshot persistence
+- [x] Snapshot timestamps and SHA-256 hashes
+- [x] Consecutive duplicate snapshot detection
+- [x] Snapshot lookup, listing, and deletion endpoints
+- [x] Basic file history and latest/oldest snapshot lookups
+- [x] Snapshot comparison endpoint
+- [x] Restore and deleted-file recovery endpoints
+- [x] Basic statistics and file listing endpoints
+- [x] Initial dashboard
+- [x] Unit tests and GitHub Actions test workflow
+
+### Still to do
+
+- [ ] Make snapshot creation and deletion reliable under concurrent requests.
+- [ ] Propagate storage failures instead of silently ignoring them.
+- [ ] Make watcher paths relative to a configured root and support nested directories.
+- [ ] Restrict restore and recovery paths to the watched root.
+- [ ] Improve diff output beyond whole-content replacement.
+- [ ] Finish dashboard history, restore, delete, and error states.
+- [ ] Add integration tests for the API, watcher, and recovery paths.
+- [ ] Add metadata indexing and snapshot search.
+- [ ] Add a CLI.
+- [ ] Support directory rollback and multiple watch roots.
+- [ ] Evaluate content-addressed blob storage and garbage collection.
 
 ---
 
-## Implemented Features
+## Architecture
 
-### Snapshot Management
+The root Go module is the application that is built and run. Its entry point starts the filesystem watcher and HTTP API.
 
-* Automatic file monitoring using fsnotify
-* Snapshot creation on file modification
-* Persistent snapshot storage using SQLite
-* Timestamped snapshots
-* Snapshot listing
-* Snapshot lookup by ID
-* Latest snapshot retrieval
-* Oldest snapshot retrieval
-* Snapshot deletion
-* Snapshot counting per file
-* File existence checks
-* File history tracking
+- `internal/api` registers HTTP routes and maintains the in-memory snapshot indexes used by the handlers.
+- `internal/models` defines the snapshot data model.
+- `internal/storage` handles SQLite persistence and SHA-256 hashing.
+- `internal/vfs` watches the configured filesystem path and submits changes for snapshotting.
+- `internal/diff` compares snapshot content.
+- `frontend` contains the browser dashboard served by the API.
+
+See [docs/architecture.md](docs/architecture.md) for the current data flow, package responsibilities, and the design decisions guiding the next iterations.
+
+SQLite currently stores snapshot metadata and content together. Content-addressed blob storage is not part of the active application yet.
 
 ---
 
-### Recovery
+## API
 
-* Restore a file from a specific snapshot
-* Recover deleted files using the latest snapshot
-* File rollback infrastructure
+The server listens on port `8080`.
 
----
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/health` | Health check |
+| GET | `/stats` | Snapshot, file, and hash counts |
+| GET | `/files` | List tracked files |
+| GET | `/files/:name/exists` | Check whether a file has snapshots |
+| GET | `/snapshots` | List all snapshots |
+| GET | `/snapshots/file/:name` | List snapshots for a file |
+| GET | `/snapshot/:id` | Get one snapshot |
+| POST | `/snapshot` | Create a snapshot |
+| DELETE | `/snapshot/:id` | Delete a snapshot |
+| GET | `/latest/:file` | Get the latest snapshot for a file |
+| GET | `/snapshot-oldest/:file` | Get the oldest snapshot for a file |
+| GET | `/snapshot-count/:file` | Count snapshots for a file |
+| GET | `/history/:file` | Get file history metadata |
+| GET | `/history-full/:file` | Get full snapshot history |
+| GET | `/snapshot-latest-id/:file` | Get the latest snapshot ID |
+| GET | `/snapshot-first-id/:file` | Get the first snapshot ID |
+| POST | `/restore/:id` | Restore a snapshot |
+| POST | `/recover/:file` | Recover a file from its latest snapshot |
+| GET | `/diff/:id1/:id2` | Compare two snapshots |
 
-### Diff and History
+These endpoints are still being hardened. In particular, restore/recovery path validation and consistent error handling are planned work.
 
-* Compare two snapshots
-* View snapshot history metadata
-* View complete snapshot history
-* Track historical versions of files
-* Retrieve first and latest snapshot IDs
-
----
-
-### Storage Optimization
-
-* SHA256 content hashing
-* Hash-based snapshot identification
-* Duplicate snapshot prevention
-* Unique hash statistics
-* Content-based deduplication
-* SQLite indexes for faster lookup
-
----
-
-### Testing & Quality
-
-* Unit tests for hashing
-* Unit tests for snapshot management
-* Unit tests for deduplication
-* Unit tests for diff functionality
-* Unit tests for SQLite persistence
-* GitHub Actions automated test execution
-* Automated validation on every push
-
----
-
-### API Architecture
-
-* Route modularization
-* Dedicated stats handler module
-* Dedicated history handler module
-* Dedicated lookup handler module
-* Reduced server.go complexity
-* Incremental backend refactoring
-* RESTful API organization
-
----
-
-### Dashboard
-
-* Statistics dashboard
-* Total snapshot count
-* Tracked file count
-* Unique hash count
-* File listing panel
-* Automatic data refresh
-
----
-
-## API Endpoints
-
-### System
-
-* `GET /`
-* `GET /health`
-* `GET /stats`
-
----
-
-### Snapshot APIs
-
-* `GET /snapshots`
-* `GET /snapshot/:id`
-* `GET /snapshot-count/:file`
-* `GET /snapshots/file/:name`
-* `POST /snapshot`
-* `DELETE /snapshot/:id`
-
----
-
-### History APIs
-
-* `GET /latest/:file`
-* `GET /snapshot-oldest/:file`
-* `GET /history/:file`
-* `GET /history-full/:file`
-* `GET /snapshot-latest-id/:file`
-* `GET /snapshot-first-id/:file`
-
----
-
-### Recovery APIs
-
-* `POST /restore/:id`
-* `POST /recover/:file`
-
----
-
-### Utility APIs
-
-* `GET /files`
-* `GET /files/:name/exists`
-* `GET /diff/:id1/:id2`
-
----
-
-## Storage
-
-### SQLite Persistence
-
-Snapshots are stored in SQLite instead of JSON files.
-
-#### Snapshot Schema
-
-```sql
-CREATE TABLE snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file TEXT NOT NULL,
-    content TEXT NOT NULL,
-    hash TEXT NOT NULL,
-    created_at DATETIME NOT NULL
-);
-```
-
-#### Indexes
-
-```sql
-CREATE INDEX idx_snapshots_file
-ON snapshots(file);
-
-CREATE INDEX idx_snapshots_hash
-ON snapshots(hash);
-```
-
----
-
-### Snapshot Fields
-
-* id
-* file
-* content
-* hash
-* created_at
-
----
-
-## Example Usage
-
-### Create Snapshot
+### Create a snapshot
 
 ```bash
 curl -X POST http://localhost:8080/snapshot \
--H "Content-Type: application/json" \
--d '{
-  "file":"test.txt",
-  "content":"hello world"
-}'
+  -H "Content-Type: application/json" \
+  -d '{"file":"notes.txt","content":"first version"}'
 ```
 
----
-
-### Get All Snapshots
+### List snapshots
 
 ```bash
 curl http://localhost:8080/snapshots
 ```
 
----
-
-### Restore Snapshot
+### Restore a snapshot
 
 ```bash
 curl -X POST http://localhost:8080/restore/1
@@ -267,144 +125,42 @@ curl -X POST http://localhost:8080/restore/1
 
 ---
 
-### Recover Deleted File
+## Development
+
+Run the application from the repository root:
 
 ```bash
-curl -X POST http://localhost:8080/recover/test.txt
+go run .
 ```
 
----
+Run the test suite from the same directory:
 
-## Project Structure
-
-```text
-rewindfs/
-├── frontend/
-│   └── index.html
-├── internal/
-│   ├── api/
-│   │   ├── server.go
-│   │   ├── history_handlers.go
-│   │   ├── lookup_handlers.go
-│   │   ├── snapshots.go
-│   │   └── stats_handlers.go
-│   ├── diff/
-│   ├── models/
-│   ├── storage/
-│   │   ├── sqlite.go
-│   │   ├── sqlite_test.go
-│   │   ├── hash.go
-│   │   └── hash_test.go
-│   └── vfs/
-│       └── watcher.go
-├── rewindfs.db
-├── main.go
-├── go.mod
-├── go.sum
-└── README.md
+```bash
+go test ./...
 ```
 
----
+The application uses SQLite through `github.com/mattn/go-sqlite3`, which requires CGO and a C compiler in environments where the driver is built from source.
 
-## Planned Features
-
-* Snapshot history dashboard
-* Snapshot restore buttons
-* Snapshot delete buttons
-* Metadata indexing
-* Command-line interface
-* Folder rollback
-* Recovery logging
-* Storage optimization metrics
-* Snapshot export/import
-* Snapshot search
-* Multi-directory monitoring
+The database is created at `rewindfs.db` relative to the process working directory. It is runtime data and should not be committed.
 
 ---
 
-## Project Focus
+## Tech
 
-This project is being built to gain practical experience with:
-
-* Filesystem architecture
-* Version control concepts
-* Snapshot-based storage systems
-* Database-backed persistence
-* Recovery and rollback mechanisms
-* Metadata management
-* Content hashing
-* Deduplication techniques
-* Backend API development
-* REST API design
-* Automated testing
-* CI/CD workflows
-* Systems programming in Go
-
----
-
-## Tech Stack
-
-* Go
-* Gin
-* SQLite
-* fsnotify
-* SHA256
-* REST APIs
-* HTML
-* CSS
-* JavaScript
-* GitHub Actions
-* Linux
-* File I/O
-* Git
-
----
-
-## Status
-
-Currently under active development.
-
-### Recent Milestones
-
-* Automatic snapshot watcher integration
-* SHA256 hashing implementation
-* Duplicate snapshot prevention
-* Snapshot comparison API
-* Recovery and restore functionality
-* Automated test suite
-* GitHub Actions CI pipeline
-* API route modularization
-* Server architecture cleanup
-* Migration from JSON storage to SQLite
-* SQLite persistence testing
-* Dashboard statistics and file listing
-
----
+- Go
+- Gin
+- SQLite
+- fsnotify
+- SHA-256
+- HTML, CSS, and JavaScript
+- GitHub Actions
 
 ## Contributors
 
 ### Siddharth S Menon
 
-* Snapshot management APIs
-* Recovery APIs
-* Statistics endpoints
-* History and lookup endpoints
-* Snapshot comparison APIs
-* Deduplication implementation
-* SQLite integration
-* SQLite persistence testing
-* Frontend dashboard
-* Automated testing
-* GitHub Actions integration
-* API refactoring and modularization
+Snapshot APIs, SQLite integration, history and lookup endpoints, diff functionality, dashboard, tests, and CI.
 
 ### Tanisha Khoria
 
-* Snapshot engine
-* Filesystem watcher
-* Core snapshot infrastructure
-* Persistence architecture
-* Storage design
-* Hashing integration
-* Snapshot automation
-* File monitoring workflows
+Snapshot engine groundwork, filesystem watcher, and early storage design.
