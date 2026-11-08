@@ -8,17 +8,17 @@ import (
 )
 
 func RegisterLookupRoutes(r *gin.Engine) {
-	r.GET("/snapshots/file/:name", func(c *gin.Context) {
-		c.JSON(http.StatusOK, snapshotService.ByFile(c.Param("name")))
-	})
+	listFile := func(c *gin.Context) {
+		file, err := requestedFile(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+			return
+		}
+		c.JSON(http.StatusOK, snapshotService.ByFile(file))
+	}
 
-	r.GET("/snapshot-count/:file", func(c *gin.Context) {
-		filename := c.Param("file")
-		c.JSON(http.StatusOK, gin.H{
-			"file":  filename,
-			"count": len(snapshotService.ByFile(filename)),
-		})
-	})
+	r.GET("/snapshots/file", listFile)
+	r.GET("/snapshots/file/:name", listFile)
 
 	r.GET("/snapshot/:id", func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))

@@ -2,9 +2,9 @@
 
 🚧 Work in Progress
 
-rewindfs is a small, Git-inspired filesystem versioning project. It watches files, stores snapshots, and exposes history, comparison, and recovery operations through an HTTP API.
+rewindfs is a small, Git-inspired filesystem versioning project. it watches files, stores snapshots, and exposes history, comparison, and recovery through an HTTP API.
 
-The current implementation is a learning project built around Go, SQLite, and fsnotify. The focus is on getting the snapshot lifecycle and storage behavior right before adding more features.
+The current implementation is built around Go, SQLite, and fsnotify. The focus is on getting the snapshot lifecycle and storage behavior right before adding more features.
 
 ---
 
@@ -24,7 +24,7 @@ The current implementation is a learning project built around Go, SQLite, and fs
 
 The repository has a Go API, SQLite persistence, a filesystem watcher, a dedicated snapshot service, basic history and lookup endpoints, and a browser dashboard.
 
-The feature list below describes the current implementation, not a claim that every path is production-ready. API validation, restore safety, and broader integration coverage still need work.
+The feature list below describes what is in the repo right now. It is still a learning project, so this is not being presented as production-ready.
 
 ### Working foundation
 
@@ -34,30 +34,24 @@ The feature list below describes the current implementation, not a claim that ev
 - [x] Handles new directories and common atomic-save rename events
 - [x] Graceful watcher and HTTP server shutdown
 - [x] Snapshot creation through the API and watcher
-- [x] Versioned SQLite schema initialization
-- [x] Transactional schema initialization and migration
+- [x] Versioned SQLite schema initialization and migration
 - [x] Database-assigned snapshot IDs
 - [x] Snapshot timestamps and SHA-256 hashes
 - [x] Consecutive duplicate snapshot detection
 - [x] Thread-safe snapshot service and in-memory indexes
 - [x] Explicit SQLite store lifecycle and configurable database path
 - [x] WAL journaling and a bounded SQLite busy timeout
-- [x] Isolated storage tests using temporary databases
-- [x] Persistence errors surfaced to callers
-- [x] Snapshot lookup, listing, and deletion endpoints
-- [x] Basic file history and latest/oldest snapshot lookups
-- [x] Snapshot comparison endpoint
-- [x] Restore and deleted-file recovery endpoints
-- [x] Basic statistics and file listing endpoints
-- [x] Initial dashboard
-- [x] Unit tests and GitHub Actions test workflow
+- [x] Snapshot lookup, listing, deletion, history, and diff endpoints
+- [x] Workspace-bound snapshot paths and safe restore/recovery
+- [x] Nested file lookups through the `?file=...` query parameter
+- [x] Local-only API binding and same-origin request checks
+- [x] Dashboard renders API data as text instead of injecting it as HTML
+- [x] Unit and API tests with GitHub Actions
 
 ### Still to do
 
-- [ ] Restrict restore and recovery paths to the watched root.
 - [ ] Improve diff output beyond whole-content replacement.
 - [ ] Finish dashboard history, restore, delete, and error states.
-- [ ] Add broader integration tests for the API and recovery paths.
 - [ ] Add metadata indexing and snapshot search.
 - [ ] Add a CLI.
 - [ ] Support directory rollback and multiple watch roots.
@@ -67,54 +61,51 @@ The feature list below describes the current implementation, not a claim that ev
 
 ## Architecture
 
-The root Go module is the application that is built and run. Startup opens the configured SQLite database and loads existing snapshots before the filesystem watcher begins processing events.
+The root Go module is the application that is built and run. Startup opens the configured SQLite database and workspace before the filesystem watcher begins processing events.
 
 - `internal/api` registers HTTP routes and maps requests to snapshot service operations.
-- `internal/snapshot` owns snapshot creation, hashing, duplicate detection, ID handling through the repository, deletion, and thread-safe in-memory indexes.
+- `internal/snapshot` owns snapshot creation, hashing, duplicate detection, deletion, and thread-safe in-memory indexes.
 - `internal/models` defines the snapshot data model.
 - `internal/storage` owns SQLite connections, schema migrations, and snapshot persistence.
-- `internal/vfs` watches the configured filesystem path and submits changes for snapshotting.
+- `internal/workspace` validates relative file keys and handles safe writes inside the workspace.
+- `internal/vfs` watches the configured workspace and submits changes for snapshotting.
 - `internal/diff` compares snapshot content.
 - `frontend` contains the browser dashboard served by the API.
 
-See [docs/architecture.md](docs/architecture.md) for the runtime flow, package responsibilities, and known limitations.
-
-SQLite stores snapshot metadata and content together. Content-addressed blob storage is not part of the active application yet.
+See [docs/architecture.md](docs/architecture.md) for the runtime flow and package responsibilities.
 
 ---
 
 ## API
 
-The server listens on port `8080`.
+The server listens on `127.0.0.1:8080` by default, so it is only reachable from the local machine. Browser requests with a different origin are rejected too.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/health` | Health check |
 | GET | `/stats` | Snapshot, file, and hash counts |
 | GET | `/files` | List tracked files |
-| GET | `/files/:name/exists` | Check whether a file has snapshots |
+| GET | `/files/exists?file=src/main.go` | Check whether a file has snapshots |
 | GET | `/snapshots` | List all snapshots |
-| GET | `/snapshots/file/:name` | List snapshots for a file |
+| GET | `/snapshots/file?file=src/main.go` | List snapshots for a file |
 | GET | `/snapshot/:id` | Get one snapshot |
 | POST | `/snapshot` | Create a snapshot |
 | DELETE | `/snapshot/:id` | Delete a snapshot |
-| GET | `/latest/:file` | Get the latest snapshot for a file |
-| GET | `/snapshot-oldest/:file` | Get the oldest snapshot for a file |
-| GET | `/snapshot-count/:file` | Count snapshots for a file |
-| GET | `/history/:file` | Get file history metadata |
-| GET | `/history-full/:file` | Get full snapshot history |
-| GET | `/snapshot-latest-id/:file` | Get the latest snapshot ID |
-| GET | `/snapshot-first-id/:file` | Get the first snapshot ID |
+| GET | `/latest?file=src/main.go` | Get the latest snapshot |
+| GET | `/snapshot-oldest?file=src/main.go` | Get the oldest snapshot |
+| GET | `/snapshot-count?file=src/main.go` | Count snapshots for a file |
+| GET | `/history?file=src/main.go` | Get file history metadata |
+| GET | `/history-full?file=src/main.go` | Get full snapshot history |
 | POST | `/restore/:id` | Restore a snapshot |
-| POST | `/recover/:file` | Recover a file from its latest snapshot |
+| POST | `/recover?file=src/main.go` | Recover a file from its latest snapshot |
 | GET | `/diff/:id1/:id2` | Compare two snapshots |
 
-Restore/recovery path validation and consistent API error handling are still being hardened.
+The older single-segment routes are still available. use the query form for nested files.
 
 ### Create a snapshot
 
 ```bash
-curl -X POST http://localhost:8080/snapshot \
+curl -X POST http://127.0.0.1:8080/snapshot \
   -H "Content-Type: application/json" \
   -d '{"file":"notes.txt","content":"first version"}'
 ```
@@ -122,13 +113,13 @@ curl -X POST http://localhost:8080/snapshot \
 ### List snapshots
 
 ```bash
-curl http://localhost:8080/snapshots
+curl http://127.0.0.1:8080/snapshots
 ```
 
 ### Restore a snapshot
 
 ```bash
-curl -X POST http://localhost:8080/restore/1
+curl -X POST http://127.0.0.1:8080/restore/1
 ```
 
 ---
@@ -152,6 +143,14 @@ The database defaults to `./rewindfs.db` for compatibility with existing install
 ```bash
 REWINDFS_DB_PATH="$HOME/.local/share/rewindfs/rewindfs.db" go run .
 ```
+
+The watched workspace defaults to the current directory. Set `REWINDFS_ROOT` to point it somewhere else:
+
+```bash
+REWINDFS_ROOT="$HOME/projects/my-app" go run .
+```
+
+The watcher and restore/recovery API use the same canonical workspace root. Snapshot paths are stored relative to it. Restore writes use a temporary file and rename it into place after checking the path and its existing components. As with most path-based filesystem checks, a local process that can actively swap symlinks at exactly the right time is outside the protection this version can fully guarantee.
 
 SQLite uses WAL journaling and a five-second busy timeout. The schema is versioned with SQLite's `user_version` pragma and migrations run inside a transaction. Existing databases are upgraded in place without replacing their snapshot rows.
 

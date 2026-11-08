@@ -66,6 +66,30 @@ func TestInitializeUsesConfiguredDatabasePath(t *testing.T) {
 	}
 }
 
+func TestInitializeUsesConfiguredWorkspaceRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	database := filepath.Join(t.TempDir(), "rewindfs.db")
+	t.Setenv("REWINDFS_ROOT", root)
+	t.Setenv("REWINDFS_DB_PATH", database)
+
+	if err := Initialize(); err != nil {
+		t.Fatalf("initialize application: %v", err)
+	}
+	defer func() {
+		if err := Close(); err != nil {
+			t.Errorf("close application: %v", err)
+		}
+	}()
+
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolve workspace: %v", err)
+	}
+	if got := WorkspacePath(); got != want {
+		t.Fatalf("WorkspacePath() = %q, want %q", got, want)
+	}
+}
+
 func TestAddSnapshotRequiresInitialization(t *testing.T) {
 	if err := Close(); err != nil {
 		t.Fatalf("reset application state: %v", err)
