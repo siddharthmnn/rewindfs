@@ -7,32 +7,45 @@ import (
 
 	"rewindfs/internal/snapshot"
 	"rewindfs/internal/storage"
+	"rewindfs/internal/workspace"
 )
 
-const defaultDatabasePath = "rewindfs.db"
+const (
+	defaultDatabasePath = "rewindfs.db"
+	defaultWorkspacePath = "."
+)
 
 var (
 	initializeMu    sync.Mutex
 	initialized     bool
 	databaseStore   *storage.Store
 	snapshotService *snapshot.Service
+	workspaceRoot   *workspace.Root
 )
 
-// Initialize opens the configured database and loads persisted snapshots
-// before the filesystem watcher or HTTP handlers begin accepting work.
-// REWINDFS_DB_PATH overrides the default ./rewindfs.db location.
+// Initialize opens the database and workspace used by the watcher and API.
+// REWINDFS_DB_PATH and REWINDFS_ROOT can both be set to use custom locations.
 func Initialize() error {
-	path := strings.TrimSpace(os.Getenv("REWINDFS_DB_PATH"))
-	if path == "" {
-		path = defaultDatabasePath
+	databasePath := strings.TrimSpace(os.Getenv("REWINDFS_DB_PATH"))
+	if databasePath == "" {
+		databasePath = defaultDatabasePath
 	}
-	return InitializeWithDBPath(path)
+	rootPath := strings.TrimSpace(os.Getenv("REWINDFS_ROOT"))
+	if rootPath == "" {
+		rootPath = defaultWorkspacePath
+	}
+
+	return InitializeWithPaths(databasePath, rootPath)
 }
 
-// InitializeWithDBPath initializes the application using an explicit database
-// path. It is useful for tests and for callers that manage configuration
-// themselves. Repeated calls are idempotent until Close is called.
+// InitializeWithDBPath keeps the older test and caller entry point.
 func InitializeWithDBPath(path string) error {
+	return InitializeWithPaths(path, defaultWorkspacePath)
+}
+
+// InitializeWithPaths initializes the database and canonical workspace root.
+// Repeated calls are idempotent until Close is called.
+func InitializeWithPaths(databasePath, rootPath string) error {
 	initializeMu.Lock()
 	defer initializeMu.Unlock()
 
@@ -40,7 +53,12 @@ func InitializeWithDBPath(path string) error {
 		return nil
 	}
 
-	store, err := storage.Open(path)
+	root, err := workspace.NewRoot(rootPath)
+	if err != nil {
+		return err
+	}
+
+	store, err := storage.Open(databasePath)
 	if err != nil {
 		return err
 	}
@@ -53,13 +71,22 @@ func InitializeWithDBPath(path string) error {
 
 	databaseStore = store
 	snapshotService = service
+	workspaceRoot = root
 	initialized = true
 	return nil
 }
 
-// Close shuts down the application-owned database store and resets the
-// initialization state. It is safe to call when the application is not
-// initialized.
+// WorkspacePath returns the canonical root used by the watcher and API.
+func WorkspacePath() string {
+	initializeMu.Lock()
+	defer initializeMu.Unlock()
+	if workspaceRoot == nil {
+		return ""
+	}
+	return workspaceRoot.Path()
+}
+
+// Close shuts down the database and clears the application state.
 func Close() error {
 	initializeMu.Lock()
 	defer initializeMu.Unlock()
@@ -67,6 +94,7 @@ func Close() error {
 	store := databaseStore
 	databaseStore = nil
 	snapshotService = nil
+	workspaceRoot = nil
 	initialized = false
 
 	if store == nil {

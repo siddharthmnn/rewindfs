@@ -20,7 +20,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	watcher, err := vfs.NewWatcher(".", func(file, content string) (bool, error) {
+	watcher, err := vfs.NewWatcher(api.WorkspacePath(), func(file, content string) (bool, error) {
 		item := models.Snapshot{File: file, Content: content}
 		return api.AddSnapshot(&item)
 	})

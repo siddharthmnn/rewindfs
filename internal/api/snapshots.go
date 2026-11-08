@@ -28,11 +28,19 @@ func AddSnapshot(item *models.Snapshot) (bool, error) {
 	if item == nil {
 		return false, snapshot.ErrInvalidFile
 	}
-	if snapshotService == nil {
+	if snapshotService == nil || workspaceRoot == nil {
 		return false, storage.ErrDBNotInitialized
 	}
 
-	created, added, err := snapshotService.Create(item.File, item.Content)
+	key, err := workspaceRoot.NormalizeKey(item.File)
+	if err != nil {
+		return false, err
+	}
+	if _, err := workspaceRoot.Resolve(key); err != nil {
+		return false, err
+	}
+
+	created, added, err := snapshotService.Create(key, item.Content)
 	if err != nil {
 		return false, err
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
@@ -13,7 +12,10 @@ import (
 	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
 	"rewindfs/internal/snapshot"
+	"rewindfs/internal/workspace"
 )
+
+const serverAddress = "127.0.0.1:8080"
 
 func StartServer() {
 	if err := Initialize(); err != nil {
@@ -26,9 +28,8 @@ func StartServer() {
 	}
 }
 
-// StartServerContext serves HTTP requests until the context is cancelled or
-// the server stops unexpectedly. The caller owns application shutdown so the
-// filesystem watcher can finish its pending work before SQLite is closed.
+// StartServerContext serves requests until the context is cancelled. The
+// caller closes the watcher before the database so pending snapshots are kept.
 func StartServerContext(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("server context must not be nil")
@@ -37,7 +38,42 @@ func StartServerContext(ctx context.Context) error {
 		return err
 	}
 
-	r := gin.Default()
+	server := &http.Server{
+		Addr:              serverAddress,
+		Handler:           newRouter(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return err
+	}
+
+	serverErrors := make(chan error, 1)
+	go func() {
+		err := server.Serve(listener)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			_ = server.Close()
+			return err
+		}
+		return nil
+	case err := <-serverErrors:
+		return err
+	}
+}
+
+func newRouter() *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery(), sameOrigin)
 	r.Static("/frontend", "./frontend")
 
 	r.GET("/", func(c *gin.Context) {
@@ -47,18 +83,6 @@ func StartServerContext(ctx context.Context) error {
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
 	RegisterLookupRoutes(r)
-
-	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "*")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	})
 
 	r.GET("/diff/:id1/:id2", func(c *gin.Context) {
 		id1, err := strconv.Atoi(c.Param("id1"))
@@ -103,8 +127,8 @@ func StartServerContext(ctx context.Context) error {
 
 		created, err := AddSnapshot(&request)
 		if err != nil {
-			if errors.Is(err, snapshot.ErrInvalidFile) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if errors.Is(err, snapshot.ErrInvalidFile) || errors.Is(err, workspace.ErrInvalidPath) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist snapshot"})
@@ -131,8 +155,12 @@ func StartServerContext(ctx context.Context) error {
 			return
 		}
 
-		if err := os.WriteFile(item.File, []byte(item.Content), 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if err := workspaceRoot.WriteFile(item.File, []byte(item.Content)); err != nil {
+			if errors.Is(err, workspace.ErrInvalidPath) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "snapshot path is not safe to restore"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to restore snapshot"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "restored", "snapshot": id})
@@ -156,56 +184,33 @@ func StartServerContext(ctx context.Context) error {
 		c.JSON(http.StatusOK, gin.H{"message": "snapshot deleted"})
 	})
 
-	r.POST("/recover/:file", func(c *gin.Context) {
-		filename := c.Param("file")
-		history := snapshotService.ByFile(filename)
+	recoverFile := func(c *gin.Context) {
+		file, err := requestedFile(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+			return
+		}
+
+		history := snapshotService.ByFile(file)
 		if len(history) == 0 {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no snapshot found"})
 			return
 		}
 
 		latest := history[len(history)-1]
-		if err := os.WriteFile(filename, []byte(latest.Content), 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if err := workspaceRoot.WriteFile(latest.File, []byte(latest.Content)); err != nil {
+			if errors.Is(err, workspace.ErrInvalidPath) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "snapshot path is not safe to recover"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to recover file"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "file recovered", "snapshot": latest.ID})
-	})
-
-	r.GET("/debug-db", func(c *gin.Context) {
-		c.JSON(http.StatusOK, snapshotService.All())
-	})
-
-	server := &http.Server{
-		Addr:              ":8080",
-		Handler:           r,
-		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	listener, err := net.Listen("tcp", server.Addr)
-	if err != nil {
-		return err
-	}
+	r.POST("/recover", recoverFile)
+	r.POST("/recover/:file", recoverFile)
 
-	serverErrors := make(chan error, 1)
-	go func() {
-		err := server.Serve(listener)
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErrors <- err
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			_ = server.Close()
-			return err
-		}
-		return nil
-
-	case err := <-serverErrors:
-		return err
-	}
+	return r
 }
