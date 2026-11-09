@@ -22,13 +22,23 @@ go run ./cmd/rewindfs delete 12
 go run ./cmd/rewindfs gc
 ```
 
-Restore, recovery, deletion, and garbage collection ask for confirmation. Restore and recovery accept `--yes` for deliberate scripted usage:
+Export or import the snapshot history:
+
+```bash
+go run ./cmd/rewindfs export ./backups/rewindfs.zip
+go run ./cmd/rewindfs import ./backups/rewindfs.zip
+```
+
+Restore, recovery, deletion, and garbage collection ask for confirmation. Import also asks before uploading archive history, and export asks before replacing an existing file. Restore, recovery, garbage collection, and import accept `--yes` for deliberate scripted usage:
 
 ```bash
 go run ./cmd/rewindfs restore 12 --yes
 go run ./cmd/rewindfs recover src/main.go --yes
 go run ./cmd/rewindfs gc --yes
+go run ./cmd/rewindfs import ./backups/rewindfs.zip --yes
 ```
+
+Archives preserve snapshot metadata, timestamps, and content. Import assigns new local IDs, skips consecutive duplicate versions, and does not write files to the workspace. The archive format is versioned and validates paths, checksums and decompressed size.
 
 Set `REWINDFS_API` to point the CLI at another RewindFS API address. The default is `http://127.0.0.1:8080`.
 
