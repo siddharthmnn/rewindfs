@@ -34,7 +34,7 @@ func run() error {
 	}
 	slog.SetDefault(logger)
 
-	if err := api.InitializeWithPaths(cfg.DatabasePath, cfg.WorkspaceRoot); err != nil {
+	if err := api.InitializeWithConfig(cfg); err != nil {
 		return err
 	}
 

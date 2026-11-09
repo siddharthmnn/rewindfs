@@ -80,7 +80,7 @@ See [docs/architecture.md](docs/architecture.md) for the runtime flow and packag
 
 ## API
 
-The server listens on `127.0.0.1:8080` by default. It accepts the local `127.0.0.1:8080` and `localhost:8080` hostnames, rejects unexpected Host/Origin values, and limits HTTP request bodies to 16 MiB. `GET /health` checks liveness, while `GET /ready` checks SQLite and workspace availability.
+The server listens on `127.0.0.1:8080` by default. It accepts the local `127.0.0.1:8080` and `localhost:8080` hostnames, rejects unexpected Host/Origin values, and limits HTTP request bodies to 16 MiB by default. Configure `REWINDFS_MAX_REQUEST_BODY_BYTES` to change the JSON request limit (1 KiB–256 MiB); archive imports retain their separate 64 MiB cap. `GET /health` checks liveness, while `GET /ready` checks SQLite and workspace availability.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -160,7 +160,7 @@ Set `REWINDFS_IGNORE` to add comma-separated ignore patterns. A pattern without 
 
 The watcher and restore/recovery API use the same canonical workspace root. Snapshot paths are stored relative to it. Restore writes use a temporary file and rename it into place after checking the path and its existing components. As with most path-based filesystem checks, a local process that can actively swap symlinks at exactly the right time is outside the protection this version can fully guarantee.
 
-Set `REWINDFS_LOG_LEVEL` to `debug`, `info`, `warn`, or `error`, and `REWINDFS_LOG_FORMAT` to `text` or `json` to control structured application logs.
+Set `REWINDFS_LOG_LEVEL` to `debug`, `info`, `warn`, or `error`, and `REWINDFS_LOG_FORMAT` to `text` or `json` to control structured application logs. `REWINDFS_MAX_REQUEST_BODY_BYTES` defaults to 16 MiB and accepts values from 1 KiB through 256 MiB.
 
 SQLite uses WAL journaling and a five-second busy timeout. The schema is versioned with SQLite's `user_version` pragma and migrations run inside a transaction. Existing v1 databases are upgraded in place: snapshot metadata, IDs, and the AUTOINCREMENT high-water mark are preserved while repeated content moves into a shared blob table. Deleting a snapshot decrements the blob reference count, and `rewindfs gc` can repair counts and remove unreferenced content.
 
