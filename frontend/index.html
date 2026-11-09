@@ -15,6 +15,7 @@ ul{list-style:none}
 li{margin-bottom:10px}
 button{background:#111;color:#fff;border:0;padding:10px 15px;border-radius:9px;cursor:pointer;font-size:14px;font-weight:600;margin:3px}
 button:hover{background:#333}
+input{width:100%;padding:11px 13px;border:1px solid #ddd;border-radius:9px;font:inherit;margin-bottom:12px}
 pre{background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:16px;overflow-x:auto;white-space:pre-wrap;word-wrap:break-word}
 #stats{font-size:17px;white-space:pre-line}
 .snapshot-link{padding:10px;border-radius:8px;margin-bottom:8px;background:#fafafa}
@@ -24,6 +25,7 @@ pre{background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:16px;
 .file-button:hover{background:transparent;text-decoration:underline}
 .muted{color:#666;font-size:13px}
 .content-block{margin-top:12px}
+.actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 </style>
 </head>
 <body>
@@ -42,6 +44,7 @@ pre{background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:16px;
 
     <div class="section">
         <h2>Snapshots</h2>
+        <input id="snapshotSearch" type="search" placeholder="filter by file path or snapshot id" aria-label="Filter snapshots">
         <div id="snapshots">Loading...</div>
     </div>
 
@@ -73,6 +76,8 @@ pre{background:#f7f7f7;border:1px solid #e5e5e5;border-radius:12px;padding:16px;
 let selectedSnapshot1 = null;
 let selectedSnapshot2 = null;
 let currentSnapshotId = null;
+let currentFile = null;
+let allSnapshots = [];
 
 const byId = (id) => document.getElementById(id);
 
@@ -137,17 +142,23 @@ async function loadFiles() {
     });
 }
 
-async function loadSnapshots() {
-    const snapshots = await getJSON("/snapshots");
+function renderSnapshots(query = "") {
     const container = byId("snapshots");
     container.replaceChildren();
 
-    if (!snapshots || snapshots.length === 0) {
-        showMessage(container, "No snapshots yet");
+    const normalized = query.trim().toLowerCase();
+    const visible = allSnapshots.filter((snapshot) =>
+        !normalized ||
+        snapshot.file.toLowerCase().includes(normalized) ||
+        String(snapshot.id).includes(normalized)
+    );
+
+    if (visible.length === 0) {
+        showMessage(container, allSnapshots.length === 0 ? "No snapshots yet" : "No matching snapshots");
         return;
     }
 
-    snapshots.slice().reverse().forEach((snapshot) => {
+    visible.slice().reverse().forEach((snapshot) => {
         const row = document.createElement("div");
         row.className = "snapshot-row";
 
@@ -168,7 +179,13 @@ async function loadSnapshots() {
     });
 }
 
+async function loadSnapshots() {
+    allSnapshots = await getJSON("/snapshots");
+    renderSnapshots(byId("snapshotSearch").value);
+}
+
 async function loadFileInfo(file) {
+    currentFile = file;
     try {
         const latest = await getJSON(fileURL("/snapshot-latest-id", file));
         const count = await getJSON(fileURL("/snapshot-count", file));
@@ -179,6 +196,14 @@ async function loadFileInfo(file) {
         addLabelValue(info, "File", file);
         addLabelValue(info, "Latest Snapshot ID", latest.latest_id);
         addLabelValue(info, "Snapshot Count", count.count);
+
+        const recover = document.createElement("button");
+        recover.textContent = "Recover Latest Version";
+        recover.addEventListener("click", recoverSelectedFile);
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        actions.appendChild(recover);
+        info.appendChild(actions);
 
         const history = byId("history");
         history.replaceChildren();
@@ -204,6 +229,7 @@ async function loadSnapshot(id) {
     try {
         const snapshot = await getJSON("/snapshot/" + encodeURIComponent(id));
         currentSnapshotId = id;
+        currentFile = snapshot.file;
 
         if (selectedSnapshot1 === null) {
             selectedSnapshot1 = id;
@@ -244,17 +270,41 @@ async function restoreSelectedSnapshot() {
         showMessage(byId("snapshotContent"), "Select a snapshot first");
         return;
     }
+    if (!window.confirm("Restore this snapshot and replace the current file?")) {
+        return;
+    }
     try {
         await getJSON("/restore/" + encodeURIComponent(currentSnapshotId), {method: "POST"});
+        await refreshDashboard();
         showMessage(byId("snapshotContent"), "Snapshot restored");
     } catch (error) {
         showMessage(byId("snapshotContent"), error.message);
     }
 }
 
+async function recoverSelectedFile() {
+    if (currentFile === null) {
+        showMessage(byId("fileInfo"), "Select a file first");
+        return;
+    }
+    if (!window.confirm("Recover the latest snapshot for " + currentFile + "?")) {
+        return;
+    }
+    try {
+        await getJSON(fileURL("/recover", currentFile), {method: "POST"});
+        await refreshDashboard();
+        showMessage(byId("fileInfo"), "Latest snapshot recovered for " + currentFile);
+    } catch (error) {
+        showMessage(byId("fileInfo"), error.message);
+    }
+}
+
 async function deleteSelectedSnapshot() {
     if (currentSnapshotId === null) {
         showMessage(byId("snapshotContent"), "Select a snapshot first");
+        return;
+    }
+    if (!window.confirm("Delete this snapshot permanently?")) {
         return;
     }
     try {
@@ -279,6 +329,7 @@ async function refreshDashboard() {
 }
 
 byId("refreshButton").addEventListener("click", refreshDashboard);
+byId("snapshotSearch").addEventListener("input", (event) => renderSnapshots(event.target.value));
 byId("restoreButton").addEventListener("click", restoreSelectedSnapshot);
 byId("deleteButton").addEventListener("click", deleteSelectedSnapshot);
 refreshDashboard();
