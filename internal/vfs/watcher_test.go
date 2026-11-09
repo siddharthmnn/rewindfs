@@ -297,15 +297,6 @@ func TestWatcherRejectsInvalidRootAndCallback(t *testing.T) {
 		t.Fatal("NewWatcher() accepted a nil callback")
 	}
 }
-package vfs
-
-import (
-	"os"
-	"path/filepath"
-	"testing"
-	"time"
-)
-
 func TestWatcherUsesConfiguredIgnorePatterns(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
