@@ -407,7 +407,7 @@ func (w *Watcher) ignored(path string) bool {
 			continue
 		}
 		for _, part := range strings.Split(slashPath, "/") {
-			if matched, _ := path.Match(rule, part); matched {
+			if matched, _ := pathpkg.Match(rule, part); matched {
 				return true
 			}
 		}
