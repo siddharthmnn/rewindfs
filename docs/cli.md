@@ -19,13 +19,15 @@ go run ./cmd/rewindfs diff 12 18
 go run ./cmd/rewindfs restore 12
 go run ./cmd/rewindfs recover src/main.go
 go run ./cmd/rewindfs delete 12
+go run ./cmd/rewindfs gc
 ```
 
-Restore, recovery, and deletion ask for confirmation. Restore and recovery accept `--yes` for deliberate scripted usage:
+Restore, recovery, deletion, and garbage collection ask for confirmation. Restore and recovery accept `--yes` for deliberate scripted usage:
 
 ```bash
 go run ./cmd/rewindfs restore 12 --yes
 go run ./cmd/rewindfs recover src/main.go --yes
+go run ./cmd/rewindfs gc --yes
 ```
 
 Set `REWINDFS_API` to point the CLI at another RewindFS API address. The default is `http://127.0.0.1:8080`.

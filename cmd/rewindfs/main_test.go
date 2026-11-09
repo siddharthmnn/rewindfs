@@ -95,3 +95,38 @@ func TestInvalidSnapshotIDIsRejectedBeforeRequest(t *testing.T) {
 		t.Fatalf("code = %d, want usage error; stderr = %s", code, errorsOut.String())
 	}
 }
+
+
+func TestGarbageCollectRequiresConfirmation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/maintenance/gc" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"removed_blobs":3}`))
+	}))
+	defer server.Close()
+
+	var output, errorsOut strings.Builder
+	code := run(context.Background(), []string{"gc"}, strings.NewReader("yes\n"), &output, &errorsOut, server.URL)
+	if code != 0 {
+		t.Fatalf("run() = %d, error = %s", code, errorsOut.String())
+	}
+	if !strings.Contains(output.String(), "removed 3 unreferenced blobs") {
+		t.Fatalf("output = %q", output.String())
+	}
+}
+
+func TestGarbageCollectCanBeCancelled(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	var output, errorsOut strings.Builder
+	code := run(context.Background(), []string{"gc"}, strings.NewReader("n\n"), &output, &errorsOut, server.URL)
+	if code != 0 || called {
+		t.Fatalf("code = %d, called = %v, stderr = %q", code, called, errorsOut.String())
+	}
+}

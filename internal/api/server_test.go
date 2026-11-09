@@ -318,3 +318,26 @@ func TestSnapshotBodyCanBeDecodedFromBytes(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+
+func TestMaintenanceGarbageCollectionRoute(t *testing.T) {
+	_, _ = newTestRouter(t)
+	item := models.Snapshot{File: "notes.txt", Content: "same bytes"}
+	if _, err := AddSnapshot(&item); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := sendAPIRequest(http.MethodPost, "/maintenance/gc", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("garbage collection status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		Removed int64 `json:"removed_blobs"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 0 {
+		t.Fatalf("removed_blobs = %d, want 0", result.Removed)
+	}
+}

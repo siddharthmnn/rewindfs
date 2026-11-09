@@ -174,6 +174,19 @@ func newRouter() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"message": "restored", "snapshot": id})
 	})
 
+	r.POST("/maintenance/gc", func(c *gin.Context) {
+		if databaseStore == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "storage is not initialized"})
+			return
+		}
+		removed, err := databaseStore.GarbageCollect()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to collect unreferenced content"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"removed_blobs": removed})
+	})
+
 	r.DELETE("/snapshot/:id", func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil || id <= 0 {
