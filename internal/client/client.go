@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"rewindfs/internal/archive"
 )
 
 const maxErrorBody = 1 << 20
@@ -42,6 +44,82 @@ func (c *Client) Post(ctx context.Context, path string, payload, result any) err
 
 func (c *Client) Delete(ctx context.Context, path string) error {
 	return c.request(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// GetBytes downloads a bounded binary response such as a snapshot archive.
+func (c *Client) GetBytes(ctx context.Context, path string) ([]byte, error) {
+	response, err := c.rawRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if err := responseError(response); err != nil {
+		return nil, err
+	}
+
+	data, err := io.ReadAll(io.LimitReader(response.Body, archive.MaxArchiveBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read rewindfs response: %w", err)
+	}
+	if int64(len(data)) > archive.MaxArchiveBytes {
+		return nil, archive.ErrArchiveTooLarge
+	}
+	return data, nil
+}
+
+// PostBytes uploads a binary payload and decodes the JSON result.
+func (c *Client) PostBytes(ctx context.Context, path, contentType string, payload []byte, result any) error {
+	response, err := c.rawRequest(ctx, http.MethodPost, path, contentType, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if err := responseError(response); err != nil {
+		return err
+	}
+	if result == nil {
+		_, _ = io.Copy(io.Discard, response.Body)
+		return nil
+	}
+	if err := json.NewDecoder(response.Body).Decode(result); err != nil {
+		return fmt.Errorf("decode rewindfs response: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) rawRequest(ctx context.Context, method, path, contentType string, body io.Reader) (*http.Response, error) {
+	if c == nil || c.http == nil {
+		return nil, errors.New("api client is not initialized")
+	}
+	if !strings.HasPrefix(path, "/") {
+		return nil, errors.New("api path must start with a slash")
+	}
+	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("build api request: %w", err)
+	}
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("connect to rewindfs: %w", err)
+	}
+	return response, nil
+}
+
+func responseError(response *http.Response) error {
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return nil
+	}
+	data, _ := io.ReadAll(io.LimitReader(response.Body, maxErrorBody))
+	var apiError struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(data, &apiError) == nil && apiError.Error != "" {
+		return fmt.Errorf("rewindfs: %s", apiError.Error)
+	}
+	return fmt.Errorf("rewindfs returned %s", response.Status)
 }
 
 func (c *Client) request(ctx context.Context, method, path string, payload, result any) error {

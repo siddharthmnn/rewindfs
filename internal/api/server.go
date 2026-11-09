@@ -1,14 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	snapshotarchive "rewindfs/internal/archive"
 	"rewindfs/internal/diff"
 	"rewindfs/internal/models"
 	"rewindfs/internal/snapshot"
@@ -86,6 +89,73 @@ func newRouter() *gin.Engine {
 	RegisterStatsRoutes(r)
 	RegisterHistoryRoutes(r)
 	RegisterLookupRoutes(r)
+
+	r.GET("/export", func(c *gin.Context) {
+		var output bytes.Buffer
+		if err := snapshotarchive.WriteArchive(&output, snapshotService.All()); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to export snapshot archive"})
+			return
+		}
+		c.Header("Content-Disposition", `attachment; filename="rewindfs-snapshots.zip"`)
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Data(http.StatusOK, "application/zip", output.Bytes())
+	})
+
+	r.POST("/import", func(c *gin.Context) {
+		data, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "snapshot archive is too large"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "could not read snapshot archive"})
+			return
+		}
+
+		items, err := snapshotarchive.ReadArchive(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			if errors.Is(err, snapshotarchive.ErrArchiveTooLarge) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "snapshot archive is too large"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot archive"})
+			return
+		}
+
+		for index := range items {
+			key, err := workspaceRoot.NormalizeKey(items[index].File)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "archive contains an unsafe file path"})
+				return
+			}
+			if _, err := workspaceRoot.Resolve(key); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "archive contains an unsafe file path"})
+				return
+			}
+			items[index].File = key
+		}
+
+		imported, skipped, err := snapshotService.CreateMany(items)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to import snapshot history"})
+			return
+		}
+
+		ids := make([]int, 0, len(imported))
+		for _, item := range imported {
+			ids = append(ids, item.ID)
+		}
+		status := http.StatusOK
+		if len(imported) > 0 {
+			status = http.StatusCreated
+		}
+		c.JSON(status, gin.H{
+			"imported":     len(imported),
+			"skipped":      skipped,
+			"snapshot_ids": ids,
+		})
+	})
 
 	r.GET("/diff/:id1/:id2", func(c *gin.Context) {
 		id1, err := strconv.Atoi(c.Param("id1"))

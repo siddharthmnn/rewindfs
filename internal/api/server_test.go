@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	snapshotarchive "rewindfs/internal/archive"
 	"rewindfs/internal/models"
 )
 
@@ -339,5 +341,141 @@ func TestMaintenanceGarbageCollectionRoute(t *testing.T) {
 	}
 	if result.Removed != 0 {
 		t.Fatalf("removed_blobs = %d, want 0", result.Removed)
+	}
+}
+
+
+func TestSnapshotArchiveExportImportRoundTrip(t *testing.T) {
+	_, sourceRoot := newTestRouter(t)
+	sourceSnapshots := []models.Snapshot{
+		{ID: 12, File: "src/main.go", Content: "same content", CreatedAt: time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 13, File: "src/main.go", Content: "second version", CreatedAt: time.Date(2026, 10, 20, 11, 0, 0, 0, time.UTC)},
+		{ID: 14, File: "README.md", Content: "same content", CreatedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)},
+	}
+	for _, item := range sourceSnapshots {
+		if _, err := AddSnapshot(&item); err != nil {
+			t.Fatalf("add source snapshot: %v", err)
+		}
+	}
+
+	exportRequest := httptest.NewRequest(http.MethodGet, "/export", nil)
+	exportRequest.Host = serverAddress
+	exportRecorder := httptest.NewRecorder()
+	newRouter().ServeHTTP(exportRecorder, exportRequest)
+	if exportRecorder.Code != http.StatusOK {
+		t.Fatalf("export status = %d, body = %s", exportRecorder.Code, exportRecorder.Body.String())
+	}
+	if exportRecorder.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("export content type = %q, want application/zip", exportRecorder.Header().Get("Content-Type"))
+	}
+	exported := exportRecorder.Body.Bytes()
+
+	decoded, err := snapshotarchive.ReadArchive(bytes.NewReader(exported), int64(len(exported)))
+	if err != nil {
+		t.Fatalf("decode exported archive: %v", err)
+	}
+	if len(decoded) != len(sourceSnapshots) {
+		t.Fatalf("exported %d snapshots, want %d", len(decoded), len(sourceSnapshots))
+	}
+	if decoded[0].ID != 1 || decoded[2].ID != 3 {
+		t.Fatalf("source snapshot IDs were not serialized: %#v", decoded)
+	}
+
+	if err := Close(); err != nil {
+		t.Fatalf("close source database: %v", err)
+	}
+	targetRoot := t.TempDir()
+	targetDB := filepath.Join(t.TempDir(), "imported.db")
+	if err := InitializeWithPaths(targetDB, targetRoot); err != nil {
+		t.Fatalf("initialize target database: %v", err)
+	}
+
+	importRequest := httptest.NewRequest(http.MethodPost, "/import", bytes.NewReader(exported))
+	importRequest.Host = serverAddress
+	importRequest.Header.Set("Content-Type", "application/zip")
+	importRecorder := httptest.NewRecorder()
+	newRouter().ServeHTTP(importRecorder, importRequest)
+	if importRecorder.Code != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", importRecorder.Code, importRecorder.Body.String())
+	}
+
+	var result struct {
+		Imported int   `json:"imported"`
+		Skipped  int   `json:"skipped"`
+		IDs      []int `json:"snapshot_ids"`
+	}
+	if err := json.Unmarshal(importRecorder.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode import response: %v", err)
+	}
+	if result.Imported != 3 || result.Skipped != 0 || len(result.IDs) != 3 {
+		t.Fatalf("unexpected import result: %#v", result)
+	}
+
+	imported := snapshotService.All()
+	if len(imported) != 3 || imported[0].ID != 1 || imported[1].ID != 2 || imported[2].ID != 3 {
+		t.Fatalf("imported history = %#v", imported)
+	}
+	if imported[0].CreatedAt != sourceSnapshots[0].CreatedAt {
+		t.Fatalf("imported timestamp = %v, want %v", imported[0].CreatedAt, sourceSnapshots[0].CreatedAt)
+	}
+	if _, err := os.Stat(filepath.Join(targetRoot, "src")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("import wrote files into the workspace: %v", err)
+	}
+	if sourceRoot == targetRoot {
+		t.Fatal("test roots unexpectedly match")
+	}
+}
+
+func TestSnapshotImportRejectsInvalidArchiveWithoutChanges(t *testing.T) {
+	_, _ = newTestRouter(t)
+	request := httptest.NewRequest(http.MethodPost, "/import", bytes.NewReader([]byte("not a zip")))
+	request.Host = serverAddress
+	request.Header.Set("Content-Type", "application/zip")
+	recorder := httptest.NewRecorder()
+	newRouter().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("import status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if len(snapshotService.All()) != 0 {
+		t.Fatalf("invalid archive changed snapshot state: %#v", snapshotService.All())
+	}
+}
+
+
+func TestSnapshotImportSkipsConsecutiveDuplicateVersions(t *testing.T) {
+	_, _ = newTestRouter(t)
+	items := []models.Snapshot{
+		{ID: 20, File: "notes.txt", Content: "one", CreatedAt: time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 21, File: "notes.txt", Content: "one", CreatedAt: time.Date(2026, 10, 20, 10, 1, 0, 0, time.UTC)},
+		{ID: 22, File: "notes.txt", Content: "two", CreatedAt: time.Date(2026, 10, 20, 10, 2, 0, 0, time.UTC)},
+		{ID: 23, File: "other.txt", Content: "one", CreatedAt: time.Date(2026, 10, 20, 10, 3, 0, 0, time.UTC)},
+	}
+	var archiveBytes bytes.Buffer
+	if err := snapshotarchive.WriteArchive(&archiveBytes, items); err != nil {
+		t.Fatalf("write input archive: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/import", bytes.NewReader(archiveBytes.Bytes()))
+	request.Host = serverAddress
+	request.Header.Set("Content-Type", "application/zip")
+	recorder := httptest.NewRecorder()
+	newRouter().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		Imported int `json:"imported"`
+		Skipped  int `json:"skipped"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 3 || result.Skipped != 1 {
+		t.Fatalf("import result = %#v, want 3 imported and 1 skipped", result)
+	}
+	if len(snapshotService.ByFile("notes.txt")) != 2 || len(snapshotService.ByFile("other.txt")) != 1 {
+		t.Fatalf("unexpected imported history: %#v", snapshotService.All())
 	}
 }
