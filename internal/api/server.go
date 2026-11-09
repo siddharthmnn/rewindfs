@@ -42,6 +42,9 @@ func StartServerContext(ctx context.Context) error {
 		Addr:              serverAddress,
 		Handler:           newRouter(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	listener, err := net.Listen("tcp", server.Addr)

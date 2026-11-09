@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -41,12 +42,20 @@ type Watcher struct {
 	closeOnce  sync.Once
 	closeErr   error
 	callbacks  sync.WaitGroup
-	watchedDirs map[string]struct{}
+	watchedDirs   map[string]struct{}
+	ignorePatterns []string
 }
 
 // NewWatcher creates a watcher for root and registers all directories that
 // already exist below it. New directories are added while the watcher runs.
 func NewWatcher(root string, snapshot SnapshotFunc) (*Watcher, error) {
+	return NewWatcherWithIgnore(root, snapshot, strings.Split(os.Getenv("REWINDFS_IGNORE"), ","))
+}
+
+// NewWatcherWithIgnore adds caller-provided path patterns to the built-in
+// generated-directory and database exclusions. Patterns match path components
+// when they contain no slash, or the workspace-relative path when they do.
+func NewWatcherWithIgnore(root string, snapshot SnapshotFunc, ignorePatterns []string) (*Watcher, error) {
 	if snapshot == nil {
 		return nil, errors.New("snapshot callback must not be nil")
 	}
@@ -83,6 +92,7 @@ func NewWatcher(root string, snapshot SnapshotFunc) (*Watcher, error) {
 		snapshot:    snapshot,
 		pending:     make(map[string]pendingEvent),
 		watchedDirs: make(map[string]struct{}),
+		ignorePatterns: append([]string(nil), ignorePatterns...),
 	}
 
 	if err := w.addTree(absoluteRoot, false); err != nil {
@@ -375,6 +385,32 @@ func (w *Watcher) ignored(path string) bool {
 		strings.HasSuffix(base, "-shm") ||
 		strings.HasSuffix(base, "-journal") {
 		return true
+	}
+
+	slashPath := filepath.ToSlash(relative)
+	for _, rule := range w.ignorePatterns {
+		rule = strings.TrimSpace(filepath.ToSlash(rule))
+		if rule == "" {
+			continue
+		}
+		if strings.HasSuffix(rule, "/") {
+			prefix := strings.TrimSuffix(rule, "/")
+			if slashPath == prefix || strings.HasPrefix(slashPath, prefix+"/") {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(rule, "/") {
+			if matched, _ := path.Match(rule, slashPath); matched {
+				return true
+			}
+			continue
+		}
+		for _, part := range strings.Split(slashPath, "/") {
+			if matched, _ := path.Match(rule, part); matched {
+				return true
+			}
+		}
 	}
 
 	return false

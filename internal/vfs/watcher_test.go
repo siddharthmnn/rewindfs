@@ -297,3 +297,73 @@ func TestWatcherRejectsInvalidRootAndCallback(t *testing.T) {
 		t.Fatal("NewWatcher() accepted a nil callback")
 	}
 }
+package vfs
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestWatcherUsesConfiguredIgnorePatterns(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshots := make(chan capturedSnapshot, 8)
+	watcher, cancel, _ := startTestWatcherWithIgnore(t, root, []string{"build/", "*.log"}, func(file, content string) (bool, error) {
+		snapshots <- capturedSnapshot{file: file, content: content}
+		return true, nil
+	})
+
+	for name, content := range map[string]string{
+		"build/output.txt": "generated",
+		"debug.log":        "log output",
+		"src/main.go":      "package main",
+	} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	waitForSnapshot(t, snapshots, "src/main.go", "package main")
+	time.Sleep(debounceDelay + 100*time.Millisecond)
+	select {
+	case extra := <-snapshots:
+		t.Fatalf("ignored path was snapshotted: %#v", extra)
+	default:
+	}
+
+	cancel()
+	_ = watcher.Close()
+}
+
+func startTestWatcherWithIgnore(t *testing.T, root string, patterns []string, callback SnapshotFunc) (*Watcher, func(), <-chan error) {
+	t.Helper()
+	watcher, err := NewWatcherWithIgnore(root, callback, patterns)
+	if err != nil {
+		t.Fatalf("create watcher: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- watcher.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		_ = watcher.Close()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("watcher stopped with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("watcher did not stop")
+		}
+	})
+	return watcher, cancel, done
+}
