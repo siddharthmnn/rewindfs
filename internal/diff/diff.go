@@ -95,12 +95,12 @@ func replacementDiff(oldContent, newContent string) string {
 	var result strings.Builder
 	result.WriteString("--- snapshot\n+++ snapshot\n")
 	for _, line := range splitLines(oldContent) {
-		result.WriteString("- ")
+		result.WriteString("-")
 		result.WriteString(line)
 		result.WriteByte('\n')
 	}
 	for _, line := range splitLines(newContent) {
-		result.WriteString("+ ")
+		result.WriteString("+")
 		result.WriteString(line)
 		result.WriteByte('\n')
 	}
