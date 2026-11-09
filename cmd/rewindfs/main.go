@@ -3,14 +3,17 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
+	"path/filepath"
 	"os"
 	"strconv"
 	"strings"
 
+	"rewindfs/internal/archive"
 	"rewindfs/internal/client"
 	"rewindfs/internal/models"
 )
@@ -162,6 +165,84 @@ func run(ctx context.Context, args []string, input io.Reader, output, errorsOut 
 		fmt.Fprintln(output, "file recovered")
 		return 0
 
+	case "export":
+		if len(args) != 2 || strings.TrimSpace(args[1]) == "" {
+			printUsage(errorsOut)
+			return 2
+		}
+		if info, err := os.Stat(args[1]); err == nil {
+			if info.IsDir() {
+				fmt.Fprintln(errorsOut, "archive destination is a directory")
+				return 1
+			}
+			if !confirm(input, output, "overwrite existing archive file? [y/N] ") {
+				fmt.Fprintln(output, "cancelled")
+				return 0
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fail(err)
+		}
+
+		data, err := api.GetBytes(ctx, "/export")
+		if err != nil {
+			return fail(err)
+		}
+		if err := writeArchiveFile(args[1], data); err != nil {
+			return fail(fmt.Errorf("write snapshot archive: %w", err))
+		}
+		fmt.Fprintf(output, "snapshot archive exported (%d bytes)\n", len(data))
+		return 0
+
+	case "import":
+		if len(args) < 2 || len(args) > 3 || strings.TrimSpace(args[1]) == "" ||
+			(len(args) == 3 && args[2] != "--yes") {
+			printUsage(errorsOut)
+			return 2
+		}
+		if len(args) != 3 && !confirm(input, output, "import snapshot history from this archive? [y/N] ") {
+			fmt.Fprintln(output, "cancelled")
+			return 0
+		}
+		file, err := os.Open(args[1])
+		if err != nil {
+			return fail(fmt.Errorf("open snapshot archive: %w", err))
+		}
+		info, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
+			return fail(fmt.Errorf("inspect snapshot archive: %w", err))
+		}
+		if !info.Mode().IsRegular() {
+			_ = file.Close()
+			return fail(errors.New("snapshot archive must be a regular file"))
+		}
+		if info.Size() > archive.MaxArchiveBytes {
+			_ = file.Close()
+			return fail(archive.ErrArchiveTooLarge)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(file, archive.MaxArchiveBytes+1))
+		closeErr := file.Close()
+		if readErr != nil {
+			return fail(fmt.Errorf("read snapshot archive: %w", readErr))
+		}
+		if closeErr != nil {
+			return fail(fmt.Errorf("close snapshot archive: %w", closeErr))
+		}
+		if int64(len(data)) > archive.MaxArchiveBytes {
+			return fail(archive.ErrArchiveTooLarge)
+		}
+
+		var result struct {
+			Imported int   `json:"imported"`
+			Skipped  int   `json:"skipped"`
+			IDs      []int `json:"snapshot_ids"`
+		}
+		if err := api.PostBytes(ctx, "/import", "application/zip", data, &result); err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(output, "imported %d snapshots, skipped %d duplicates\n", result.Imported, result.Skipped)
+		return 0
+
 	case "gc":
 		if len(args) != 2 || args[1] != "--yes" {
 			if len(args) != 1 {
@@ -204,6 +285,33 @@ func run(ctx context.Context, args []string, input io.Reader, output, errorsOut 
 	}
 }
 
+func writeArchiveFile(path string, data []byte) error {
+	directory := filepath.Dir(path)
+	temp, err := os.CreateTemp(directory, ".rewindfs-export-*")
+	if err != nil {
+		return err
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempName, path)
+}
+
 func positiveInteger(value string) bool {
 	number, err := strconv.Atoi(value)
 	return err == nil && number > 0
@@ -242,7 +350,9 @@ usage:
   rewindfs recover <file> [--yes]
   rewindfs delete <snapshot-id>
   rewindfs gc [--yes]
+  rewindfs export <archive-path>
+  rewindfs import <archive-path> [--yes]
 
 set REWINDFS_API to use another local API address.
-restore, recover, and delete ask before changing workspace data.`)
+restore, recover, delete, import, and overwrite operations ask before proceeding.`)
 }
