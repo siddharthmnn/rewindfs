@@ -15,7 +15,7 @@ An earlier `backend/` directory contained a separate Go module, a second SQLite 
 3. The watcher debounces create/write/rename events, reads the settled file, and submits it using a slash-separated path relative to the watch root.
 4. `internal/api` maps HTTP requests to the snapshot service. `internal/snapshot` validates the file key, calculates the SHA-256 hash, checks the latest version for duplicates, and coordinates persistence.
 5. `internal/storage` owns a `Store` instance. It applies schema migrations transactionally, inserts new snapshot rows, and returns the ID assigned by SQLite. The service updates its in-memory indexes only after the insert succeeds.
-6. The dashboard in `frontend/` reads snapshot, history, statistics, and diff data through the HTTP API.
+6. The API exposes history and lookup routes, workspace-safe restore/recovery, and search pages over file paths.\n7. The dashboard in `frontend/` reads snapshot, history, statistics, search, and diff data through the HTTP API.
 
 Snapshot creation and deletion are serialized by the service. Read operations use a read lock and return copies of stored values so callers cannot mutate the service's indexes.
 
@@ -27,9 +27,9 @@ Snapshot creation and deletion are serialized by the service. Read operations us
 | `internal/api` | HTTP routes, request/response mapping, application initialization, and the SQLite repository adapter |
 | `internal/snapshot` | Snapshot lifecycle, hashing, duplicate checks, indexes, and concurrency control |
 | `internal/models` | Snapshot data model |
-| `internal/storage` | SQLite connection lifecycle, schema migrations, and snapshot persistence |
+| `internal/storage` | SQLite connection lifecycle, schema migrations, and snapshot persistence |\n| `internal/workspace` | Workspace-root path validation and atomic restore/recovery writes |
 | `internal/vfs` | Filesystem event monitoring |
-| `internal/diff` | Snapshot content comparison |
+| `internal/diff` | Bounded line-oriented snapshot comparison |
 | `frontend` | Browser dashboard |
 
 The snapshot service depends on a small repository interface. The API package supplies the SQLite-backed implementation, while service tests use an in-memory repository. Storage tests open independent temporary database files, so test runs do not share or overwrite a developer's runtime database.
@@ -62,7 +62,7 @@ SQLite connections use WAL journaling, a five-second busy timeout, foreign-key e
 
 SQLite is the persistence layer for the active application. The database file defaults to `rewindfs.db` in the process working directory and can be relocated with `REWINDFS_DB_PATH`. It is local runtime data and must stay out of version control.
 
-The current schema stores file path, content, hash, and creation time in the same snapshot row. The earlier blob prototype is not wired into this schema. Moving to content-addressed blobs will require an explicit migration and lifecycle design, including how references are counted and how unreferenced blobs are collected.
+The current schema stores file path, content, hash, and creation time in the same snapshot row. Content-addressed blob storage is not wired into the active application yet. Moving to blobs still needs a separately reviewed migration and lifecycle design, including reference accounting and safe collection of unreferenced content.
 
 ## Decisions for upcoming work
 
@@ -74,13 +74,13 @@ The current schema stores file path, content, hash, and creation time in the sam
 - Keep database files, SQLite sidecars, and generated blobs out of commits.
 - Add new storage formats only when they are integrated with the active application and covered by tests.
 
-## Known limitations
+## Current boundaries
 
-The current implementation is a working prototype, not yet a hardened filesystem service. Remaining limitations include:
+- The service watches one workspace root per process.
+- Snapshot content is stored in SQLite rows; content-addressed blobs and garbage collection are not implemented.
+- The CLI and snapshot archive import/export workflows are not implemented.
+- The line diff uses a bounded LCS table and falls back to a full replacement for very large line combinations.
+- Workspace path checks reject existing symlinks and traversal, but path-based checks cannot fully prevent a hostile local process from swapping directory entries between checks.
+- The API is intentionally local-only. Remote access needs authentication and a separate deployment model.
 
-- Restore and recovery do not yet enforce a configured filesystem root.
-- The current diff implementation reports changed content as whole old/new strings.
-- The dashboard interpolates API data into HTML and needs safe DOM rendering.
-- The HTTP middleware and handlers need a separate validation and error-handling pass.
-
-These limitations are tracked in the project roadmap and should be removed in the relevant implementation sections.
+These are deliberate boundaries, not hidden capabilities. New storage formats, remote access, and additional executables should be added with independent migrations and tests.
