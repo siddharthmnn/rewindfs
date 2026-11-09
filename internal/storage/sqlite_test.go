@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -358,5 +359,232 @@ func TestNilStoreReturnsNotInitialized(t *testing.T) {
 	}
 	if err := store.DeleteSnapshot(1); err != ErrDBNotInitialized {
 		t.Fatalf("DeleteSnapshot() error = %v, want ErrDBNotInitialized", err)
+	}
+}
+
+
+func TestContentBlobsAreSharedAcrossSnapshots(t *testing.T) {
+	store := openTestStore(t, testDatabasePath(t))
+	now := time.Now().UTC()
+
+	for _, file := range []string{"left/main.go", "right/main.go"} {
+		if _, err := store.InsertSnapshot(models.Snapshot{
+			File: file, Content: "same bytes", Hash: "shared-hash", CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("insert %s: %v", file, err)
+		}
+	}
+
+	var blobs, references int
+	if err := store.db.QueryRow("SELECT COUNT(*), SUM(ref_count) FROM content_blobs").Scan(&blobs, &references); err != nil {
+		t.Fatal(err)
+	}
+	if blobs != 1 || references != 2 {
+		t.Fatalf("blob count/ref count = %d/%d, want 1/2", blobs, references)
+	}
+
+	items, err := store.LoadAllSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Content != "same bytes" || items[1].Content != "same bytes" {
+		t.Fatalf("loaded snapshots did not resolve shared content: %#v", items)
+	}
+}
+
+func TestDeleteDropsBlobOnlyAfterLastSnapshotReference(t *testing.T) {
+	store := openTestStore(t, testDatabasePath(t))
+	now := time.Now().UTC()
+
+	first, err := store.InsertSnapshot(models.Snapshot{
+		File: "a.txt", Content: "shared", Hash: "shared", CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.InsertSnapshot(models.Snapshot{
+		File: "b.txt", Content: "shared", Hash: "shared", CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteSnapshot(first); err != nil {
+		t.Fatalf("delete first reference: %v", err)
+	}
+	var count, references int
+	if err := store.db.QueryRow("SELECT COUNT(*), COALESCE(SUM(ref_count), 0) FROM content_blobs").Scan(&count, &references); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || references != 1 {
+		t.Fatalf("blob state after first delete = %d/%d, want 1/1", count, references)
+	}
+
+	if err := store.DeleteSnapshot(second); err != nil {
+		t.Fatalf("delete final reference: %v", err)
+	}
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM content_blobs").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("content blob count after last delete = %d, want 0", count)
+	}
+}
+
+func TestInsertRejectsHashCollision(t *testing.T) {
+	store := openTestStore(t, testDatabasePath(t))
+	now := time.Now().UTC()
+
+	if _, err := store.InsertSnapshot(models.Snapshot{
+		File: "first.txt", Content: "first bytes", Hash: "same-hash", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertSnapshot(models.Snapshot{
+		File: "second.txt", Content: "different bytes", Hash: "same-hash", CreatedAt: now,
+	}); !errors.Is(err, ErrHashCollision) {
+		t.Fatalf("InsertSnapshot() error = %v, want ErrHashCollision", err)
+	}
+
+	items, err := store.LoadAllSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].File != "first.txt" {
+		t.Fatalf("collision attempt changed snapshots: %#v", items)
+	}
+}
+
+func TestGarbageCollectRepairsReferencesAndRemovesOrphans(t *testing.T) {
+	store := openTestStore(t, testDatabasePath(t))
+	now := time.Now().UTC()
+
+	if _, err := store.InsertSnapshot(models.Snapshot{
+		File: "used.txt", Content: "used", Hash: "used-hash", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		"INSERT INTO content_blobs (hash, content, ref_count) VALUES (?, ?, ?)",
+		"orphan-hash", "orphan", 99,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		"UPDATE content_blobs SET ref_count = 42 WHERE hash = ?",
+		"used-hash",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := store.GarbageCollect()
+	if err != nil {
+		t.Fatalf("GarbageCollect(): %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("GarbageCollect() deleted %d blobs, want 1", deleted)
+	}
+
+	var references int
+	if err := store.db.QueryRow("SELECT ref_count FROM content_blobs WHERE hash = ?", "used-hash").Scan(&references); err != nil {
+		t.Fatal(err)
+	}
+	if references != 1 {
+		t.Fatalf("repaired reference count = %d, want 1", references)
+	}
+}
+
+func TestMigrationV1ToV2PreservesRowsAndDeletedIDHighWaterMark(t *testing.T) {
+	path := testDatabasePath(t)
+	legacyDB, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := []string{
+		"CREATE TABLE snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, file TEXT NOT NULL, content TEXT NOT NULL, hash TEXT NOT NULL, created_at DATETIME NOT NULL)",
+		"CREATE INDEX idx_snapshots_file ON snapshots(file)",
+		"CREATE INDEX idx_snapshots_hash ON snapshots(hash)",
+		"INSERT INTO snapshots (id, file, content, hash, created_at) VALUES (1, 'left.txt', 'shared', 'shared-hash', '2026-01-01T00:00:00Z')",
+		"INSERT INTO snapshots (id, file, content, hash, created_at) VALUES (2, 'right.txt', 'shared', 'shared-hash', '2026-01-02T00:00:00Z')",
+		"INSERT INTO snapshots (id, file, content, hash, created_at) VALUES (7, 'removed.txt', 'old', 'old-hash', '2026-01-03T00:00:00Z')",
+		"DELETE FROM snapshots WHERE id = 7",
+		"PRAGMA user_version = 1",
+	}
+	for _, statement := range statements {
+		if _, err := legacyDB.Exec(statement); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("prepare v1 database: %v", err)
+		}
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store := openTestStore(t, path)
+	items, err := store.LoadAllSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != 1 || items[1].ID != 2 ||
+		items[0].Content != "shared" || items[1].Content != "shared" {
+		t.Fatalf("migrated snapshots = %#v", items)
+	}
+
+	var blobCount, references int
+	if err := store.db.QueryRow("SELECT COUNT(*), SUM(ref_count) FROM content_blobs").Scan(&blobCount, &references); err != nil {
+		t.Fatal(err)
+	}
+	if blobCount != 1 || references != 2 {
+		t.Fatalf("migrated blob state = %d/%d, want 1/2", blobCount, references)
+	}
+
+	nextID, err := store.InsertSnapshot(models.Snapshot{
+		File: "next.txt", Content: "next", Hash: "next-hash", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextID != 8 {
+		t.Fatalf("next ID after migration = %d, want 8", nextID)
+	}
+}
+
+func TestMigrationRejectsOneHashForDifferentContent(t *testing.T) {
+	path := testDatabasePath(t)
+	legacyDB, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := []string{
+		"CREATE TABLE snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, file TEXT NOT NULL, content TEXT NOT NULL, hash TEXT NOT NULL, created_at DATETIME NOT NULL)",
+		"INSERT INTO snapshots (file, content, hash, created_at) VALUES ('a.txt', 'first', 'collision', '2026-01-01T00:00:00Z')",
+		"INSERT INTO snapshots (file, content, hash, created_at) VALUES ('b.txt', 'second', 'collision', '2026-01-02T00:00:00Z')",
+		"PRAGMA user_version = 1",
+	}
+	for _, statement := range statements {
+		if _, err := legacyDB.Exec(statement); err != nil {
+			_ = legacyDB.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(path); err == nil {
+		t.Fatal("Open() succeeded with a content hash mapped to different values")
+	}
+	checkDB, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkDB.Close()
+
+	var version int
+	if err := checkDB.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 1 {
+		t.Fatalf("schema version after failed migration = %d, want 1", version)
 	}
 }
