@@ -162,6 +162,26 @@ func run(ctx context.Context, args []string, input io.Reader, output, errorsOut 
 		fmt.Fprintln(output, "file recovered")
 		return 0
 
+	case "gc":
+		if len(args) != 2 || args[1] != "--yes" {
+			if len(args) != 1 {
+				printUsage(errorsOut)
+				return 2
+			}
+			if !confirm(input, output, "remove unreferenced content blobs? [y/N] ") {
+				fmt.Fprintln(output, "cancelled")
+				return 0
+			}
+		}
+		var result struct {
+			Removed int64 `json:"removed_blobs"`
+		}
+		if err := api.Post(ctx, "/maintenance/gc", nil, &result); err != nil {
+			return fail(err)
+		}
+		fmt.Fprintf(output, "removed %d unreferenced blobs\n", result.Removed)
+		return 0
+
 	case "delete":
 		if len(args) != 2 || !positiveInteger(args[1]) {
 			printUsage(errorsOut)
@@ -221,6 +241,7 @@ usage:
   rewindfs restore <snapshot-id> [--yes]
   rewindfs recover <file> [--yes]
   rewindfs delete <snapshot-id>
+  rewindfs gc [--yes]
 
 set REWINDFS_API to use another local API address.
 restore, recover, and delete ask before changing workspace data.`)

@@ -38,6 +38,8 @@ The feature list below describes what is in the repo right now. It is still a le
 - [x] Database-assigned snapshot IDs
 - [x] Snapshot timestamps and SHA-256 hashes
 - [x] Consecutive duplicate snapshot detection
+- [x] Shared content blobs keyed by SHA-256 across different files
+- [x] Reference-counted blob cleanup and a consistency garbage collector
 - [x] Thread-safe snapshot service and in-memory indexes
 - [x] Explicit SQLite store lifecycle and configurable database path
 - [x] WAL journaling and a bounded SQLite busy timeout
@@ -53,12 +55,9 @@ The feature list below describes what is in the repo right now. It is still a le
 
 ### Still to do
 
-- [ ] Improve diff output beyond whole-content replacement.
-- [ ] Finish dashboard history, restore, delete, and error states.
-- [ ] Add metadata indexing and snapshot search.
 - [x] Add a Go CLI backed by the local HTTP API.
 - [ ] Support directory rollback and multiple watch roots.
-- [ ] Evaluate content-addressed blob storage and garbage collection.
+- [x] Content-addressed storage with cross-file deduplication and reference-counted garbage collection.
 
 ---
 
@@ -89,9 +88,11 @@ The server listens on `127.0.0.1:8080` by default. It accepts the local `127.0.0
 | GET | `/stats` | Snapshot, file, and hash counts |
 | GET | `/files` | List tracked files |
 | GET | `/files/exists?file=src/main.go` | Check whether a file has snapshots |
-| GET | `/snapshots` | List all snapshots |\n| GET | `/snapshots/search?q=src/&limit=25&offset=0` | Search and paginate snapshots by file path |
+| GET | `/snapshots` | List all snapshots |
+| GET | `/snapshots/search?q=src/&limit=25&offset=0` | Search and paginate snapshots by file path |
 | GET | `/snapshots/file?file=src/main.go` | List snapshots for a file |
 | GET | `/snapshot/:id` | Get one snapshot |
+| POST | `/maintenance/gc` | Repair blob references and remove unreferenced content |
 | POST | `/snapshot` | Create a snapshot |
 | DELETE | `/snapshot/:id` | Delete a snapshot |
 | GET | `/latest?file=src/main.go` | Get the latest snapshot |
@@ -157,7 +158,7 @@ Set `REWINDFS_IGNORE` to add comma-separated ignore patterns. A pattern without 
 
 The watcher and restore/recovery API use the same canonical workspace root. Snapshot paths are stored relative to it. Restore writes use a temporary file and rename it into place after checking the path and its existing components. As with most path-based filesystem checks, a local process that can actively swap symlinks at exactly the right time is outside the protection this version can fully guarantee.
 
-SQLite uses WAL journaling and a five-second busy timeout. The schema is versioned with SQLite's `user_version` pragma and migrations run inside a transaction. Existing databases are upgraded in place without replacing their snapshot rows.
+SQLite uses WAL journaling and a five-second busy timeout. The schema is versioned with SQLite's `user_version` pragma and migrations run inside a transaction. Existing v1 databases are upgraded in place: snapshot metadata, IDs, and the AUTOINCREMENT high-water mark are preserved while repeated content moves into a shared blob table. Deleting a snapshot decrements the blob reference count, and `rewindfs gc` can repair counts and remove unreferenced content.
 
 The application uses SQLite through `github.com/mattn/go-sqlite3`, which requires CGO and a C compiler in environments where the driver is built from source.
 
@@ -176,9 +177,10 @@ go run ./cmd/rewindfs history src/main.go
 go run ./cmd/rewindfs diff 12 18
 go run ./cmd/rewindfs restore 12
 go run ./cmd/rewindfs recover src/main.go
+go run ./cmd/rewindfs gc
 ```
 
-Restore, recovery, and deletion ask for confirmation. Add `--yes` to restore or recover when running an intentional scripted operation. Set `REWINDFS_API` to use another API address; the default is `http://127.0.0.1:8080`.
+Restore, recovery, deletion, and garbage collection ask for confirmation. Add `--yes` to restore, recover, or garbage collection when running an intentional scripted operation. Set `REWINDFS_API` to use another API address; the default is `http://127.0.0.1:8080`.
 
 ## Tech
 
