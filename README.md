@@ -150,8 +150,10 @@ REWINDFS_DB_PATH="$HOME/.local/share/rewindfs/rewindfs.db" go run .
 The watched workspace defaults to the current directory. Set `REWINDFS_ROOT` to point it somewhere else:
 
 ```bash
-REWINDFS_ROOT="$HOME/projects/my-app" go run .
+REWINDFS_ROOT="$HOME/projects/my-app" REWINDFS_IGNORE="*.log,build/,tmp/" go run .
 ```
+
+Set `REWINDFS_IGNORE` to add comma-separated ignore patterns. A pattern without a slash matches any path component; a pattern ending in `/` excludes that directory and its contents.
 
 The watcher and restore/recovery API use the same canonical workspace root. Snapshot paths are stored relative to it. Restore writes use a temporary file and rename it into place after checking the path and its existing components. As with most path-based filesystem checks, a local process that can actively swap symlinks at exactly the right time is outside the protection this version can fully guarantee.
 
