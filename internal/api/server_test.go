@@ -477,3 +477,21 @@ func TestSnapshotImportSkipsConsecutiveDuplicateVersions(t *testing.T) {
 		t.Fatalf("unexpected imported history: %#v", snapshotService.All())
 	}
 }
+
+func TestReadinessEndpointChecksApplicationDependencies(t *testing.T) {
+	_, _ = newTestRouter(t)
+
+	ready := sendAPIRequest(http.MethodGet, "/ready", "")
+	if ready.Code != http.StatusOK || !strings.Contains(ready.Body.String(), `"status":"ready"`) {
+		t.Fatalf("ready status = %d, body = %s", ready.Code, ready.Body.String())
+	}
+
+	store := databaseStore
+	databaseStore = nil
+	notReady := sendAPIRequest(http.MethodGet, "/ready", "")
+	databaseStore = store
+	if notReady.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(notReady.Body.String(), `"status":"not_ready"`) {
+		t.Fatalf("not-ready status = %d, body = %s", notReady.Code, notReady.Body.String())
+	}
+}

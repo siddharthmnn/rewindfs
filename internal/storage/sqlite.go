@@ -202,6 +202,16 @@ func (s *Store) database() (*sql.DB, error) {
 	return s.db, nil
 }
 
+// Ping checks whether the SQLite connection is still usable.
+func (s *Store) Ping(ctx context.Context) error {
+	db, err := s.database()
+	if err != nil {
+		return err
+	}
+	return db.PingContext(ctx)
+}
+
+
 // InsertSnapshot stores one snapshot using the same transaction path as bulk imports.
 func (s *Store) InsertSnapshot(item models.Snapshot) (int, error) {
 	ids, err := s.InsertSnapshots([]models.Snapshot{item})
