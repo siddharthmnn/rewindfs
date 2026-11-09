@@ -21,6 +21,7 @@ var (
 
 type Repository interface {
 	InsertSnapshot(models.Snapshot) (int, error)
+	InsertSnapshots([]models.Snapshot) ([]int, error)
 	LoadAllSnapshots() ([]models.Snapshot, error)
 	DeleteSnapshot(int) error
 }
@@ -122,6 +123,84 @@ func (s *Service) Create(file, content string) (models.Snapshot, bool, error) {
 	s.byID[item.ID] = item
 	s.byFile[file] = append(history, item)
 	return item, true, nil
+}
+
+// CreateMany imports snapshot history as one persistence transaction. Existing
+// consecutive duplicates are skipped, while each accepted snapshot gets a new
+// local ID and keeps the source timestamp.
+func (s *Service) CreateMany(items []models.Snapshot) ([]models.Snapshot, int, error) {
+	if s.repo == nil {
+		return nil, 0, errors.New("snapshot repository is not configured")
+	}
+	if len(items) == 0 {
+		return []models.Snapshot{}, 0, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	latestHashes := make(map[string]string, len(s.byFile))
+	for file, history := range s.byFile {
+		if len(history) > 0 {
+			latestHashes[file] = history[len(history)-1].Hash
+		}
+	}
+
+	pending := make([]models.Snapshot, 0, len(items))
+	skipped := 0
+	for _, source := range items {
+		if strings.TrimSpace(source.File) == "" {
+			return nil, skipped, ErrInvalidFile
+		}
+		sum := sha256.Sum256([]byte(source.Content))
+		hash := hex.EncodeToString(sum[:])
+		if latestHashes[source.File] == hash {
+			skipped++
+			continue
+		}
+
+		createdAt := source.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		} else {
+			createdAt = createdAt.UTC()
+		}
+		pending = append(pending, models.Snapshot{
+			File: source.File, Content: source.Content, Hash: hash, CreatedAt: createdAt,
+		})
+		latestHashes[source.File] = hash
+	}
+
+	if len(pending) == 0 {
+		return []models.Snapshot{}, skipped, nil
+	}
+	ids, err := s.repo.InsertSnapshots(pending)
+	if err != nil {
+		return nil, skipped, fmt.Errorf("persist imported snapshots: %w", err)
+	}
+	if len(ids) != len(pending) {
+		return nil, skipped, fmt.Errorf("repository returned %d IDs for %d imported snapshots", len(ids), len(pending))
+	}
+	seenIDs := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, skipped, fmt.Errorf("%w: %d", ErrInvalidRepositoryID, id)
+		}
+		if _, exists := seenIDs[id]; exists {
+			return nil, skipped, fmt.Errorf("repository returned duplicate snapshot ID %d", id)
+		}
+		seenIDs[id] = struct{}{}
+	}
+
+	created := make([]models.Snapshot, 0, len(pending))
+	for index, item := range pending {
+		item.ID = ids[index]
+		s.snapshots = append(s.snapshots, item)
+		s.byID[item.ID] = item
+		s.byFile[item.File] = append(s.byFile[item.File], item)
+		created = append(created, item)
+	}
+	return created, skipped, nil
 }
 
 func (s *Service) Delete(id int) error {

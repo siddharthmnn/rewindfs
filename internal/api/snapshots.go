@@ -14,6 +14,10 @@ func (r sqliteSnapshotRepository) InsertSnapshot(item models.Snapshot) (int, err
 	return r.store.InsertSnapshot(item)
 }
 
+func (r sqliteSnapshotRepository) InsertSnapshots(items []models.Snapshot) ([]int, error) {
+	return r.store.InsertSnapshots(items)
+}
+
 func (r sqliteSnapshotRepository) LoadAllSnapshots() ([]models.Snapshot, error) {
 	return r.store.LoadAllSnapshots()
 }

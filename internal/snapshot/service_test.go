@@ -43,6 +43,35 @@ func (r *memoryRepository) InsertSnapshot(item models.Snapshot) (int, error) {
 	return item.ID, nil
 }
 
+func (r *memoryRepository) InsertSnapshots(items []models.Snapshot) ([]int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.insertCalls++
+	if r.insertErr != nil {
+		return nil, r.insertErr
+	}
+	if r.nextID == 0 {
+		r.nextID = 1
+		for _, existing := range r.snapshots {
+			if existing.ID >= r.nextID {
+				r.nextID = existing.ID + 1
+			}
+		}
+	}
+
+	created := make([]models.Snapshot, 0, len(items))
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		item.ID = r.nextID
+		r.nextID++
+		created = append(created, item)
+		ids = append(ids, item.ID)
+	}
+	r.snapshots = append(r.snapshots, created...)
+	return ids, nil
+}
+
 func (r *memoryRepository) LoadAllSnapshots() ([]models.Snapshot, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -369,3 +398,97 @@ func TestSearchDoesNotMatchSnapshotContent(t *testing.T) {
 	}
 }
 
+
+
+func TestCreateManyPreservesOrderAndSkipsConsecutiveDuplicates(t *testing.T) {
+	service := NewService(&memoryRepository{})
+	createdAt := time.Date(2026, 10, 21, 9, 0, 0, 0, time.FixedZone("IST", 5*60*60+30*60))
+
+	items := []models.Snapshot{
+		{ID: 80, File: "src/main.go", Content: "first", CreatedAt: createdAt},
+		{ID: 81, File: "src/main.go", Content: "first", CreatedAt: createdAt.Add(time.Minute)},
+		{ID: 82, File: "src/main.go", Content: "second", CreatedAt: createdAt.Add(2 * time.Minute)},
+		{ID: 83, File: "README.md", Content: "first", CreatedAt: createdAt.Add(3 * time.Minute)},
+	}
+
+	imported, skipped, err := service.CreateMany(items)
+	if err != nil {
+		t.Fatalf("CreateMany(): %v", err)
+	}
+	if len(imported) != 3 || skipped != 1 {
+		t.Fatalf("CreateMany() imported/skipped = %d/%d, want 3/1", len(imported), skipped)
+	}
+	if imported[0].ID != 1 || imported[1].ID != 2 || imported[2].ID != 3 {
+		t.Fatalf("imported snapshots did not receive new sequential IDs: %#v", imported)
+	}
+	if imported[0].CreatedAt.Location() != time.UTC || !imported[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("imported timestamp = %v, want original instant in UTC", imported[0].CreatedAt)
+	}
+	if len(service.ByFile("src/main.go")) != 2 || len(service.ByFile("README.md")) != 1 {
+		t.Fatalf("unexpected imported history: %#v", service.All())
+	}
+}
+
+func TestCreateManySkipsContentAlreadyAtHead(t *testing.T) {
+	service := NewService(&memoryRepository{})
+	original, _, err := service.Create("notes.txt", "existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imported, skipped, err := service.CreateMany([]models.Snapshot{
+		{File: "notes.txt", Content: "existing"},
+		{File: "notes.txt", Content: "new"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported) != 1 || skipped != 1 {
+		t.Fatalf("CreateMany() imported/skipped = %d/%d, want 1/1", len(imported), skipped)
+	}
+	if imported[0].ID != original.ID+1 {
+		t.Fatalf("imported ID = %d, want %d", imported[0].ID, original.ID+1)
+	}
+}
+
+func TestCreateManyDoesNotPublishOnRepositoryFailure(t *testing.T) {
+	repo := &memoryRepository{insertErr: errors.New("database unavailable")}
+	service := NewService(repo)
+	items := []models.Snapshot{
+		{File: "a.txt", Content: "one"},
+		{File: "b.txt", Content: "two"},
+	}
+
+	if _, _, err := service.CreateMany(items); err == nil {
+		t.Fatal("CreateMany() succeeded despite a persistence failure")
+	}
+	if len(service.All()) != 0 {
+		t.Fatalf("failed import was published in memory: %#v", service.All())
+	}
+}
+
+
+type invalidBatchRepository struct {
+	memoryRepository
+	ids []int
+}
+
+func (r *invalidBatchRepository) InsertSnapshots(items []models.Snapshot) ([]int, error) {
+	return append([]int(nil), r.ids...), nil
+}
+
+func TestCreateManyValidatesAllIDsBeforePublishing(t *testing.T) {
+	repo := &invalidBatchRepository{ids: []int{1, 0}}
+	service := NewService(repo)
+	items := []models.Snapshot{
+		{File: "one.txt", Content: "one"},
+		{File: "two.txt", Content: "two"},
+	}
+
+	if _, _, err := service.CreateMany(items); !errors.Is(err, ErrInvalidRepositoryID) {
+		t.Fatalf("CreateMany() error = %v, want ErrInvalidRepositoryID", err)
+	}
+	if got := len(service.All()); got != 0 {
+		t.Fatalf("invalid batch IDs published %d snapshots", got)
+	}
+}

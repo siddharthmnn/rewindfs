@@ -588,3 +588,47 @@ func TestMigrationRejectsOneHashForDifferentContent(t *testing.T) {
 		t.Fatalf("schema version after failed migration = %d, want 1", version)
 	}
 }
+
+
+func TestInsertSnapshotsCommitsWholeBatchOrNothing(t *testing.T) {
+	store := openTestStore(t, testDatabasePath(t))
+	now := time.Now().UTC()
+
+	_, err := store.InsertSnapshots([]models.Snapshot{
+		{File: "one.txt", Content: "first bytes", Hash: "shared", CreatedAt: now},
+		{File: "two.txt", Content: "different bytes", Hash: "shared", CreatedAt: now.Add(time.Minute)},
+	})
+	if !errors.Is(err, ErrHashCollision) {
+		t.Fatalf("InsertSnapshots() error = %v, want ErrHashCollision", err)
+	}
+
+	items, err := store.LoadAllSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("partially committed batch: %#v", items)
+	}
+	var blobs int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM content_blobs").Scan(&blobs); err != nil {
+		t.Fatal(err)
+	}
+	if blobs != 0 {
+		t.Fatalf("partially committed blob count = %d, want 0", blobs)
+	}
+}
+
+func TestInsertSnapshotsReturnsIDsInInputOrder(t *testing.T) {
+	store := openTestStore(t, testDatabasePath(t))
+	now := time.Now().UTC()
+	ids, err := store.InsertSnapshots([]models.Snapshot{
+		{File: "first.txt", Content: "first", Hash: "first-hash", CreatedAt: now},
+		{File: "second.txt", Content: "second", Hash: "second-hash", CreatedAt: now.Add(time.Second)},
+	})
+	if err != nil {
+		t.Fatalf("InsertSnapshots(): %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
+		t.Fatalf("InsertSnapshots() IDs = %v, want [1 2]", ids)
+	}
+}
