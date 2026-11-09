@@ -339,3 +339,33 @@ func TestConcurrentCreatesReceiveUniqueIDs(t *testing.T) {
 		t.Fatalf("All() returned %d snapshots, want %d", got, count)
 	}
 }
+ 
+func TestSearchFiltersByFileAndPaginates(t *testing.T) {
+	service := NewService(&memoryRepository{})
+	for _, file := range []string{"src/main.go", "src/http/server.go", "docs/readme.md"} {
+		if _, _, err := service.Create(file, file); err != nil {
+			t.Fatalf("Create(%q): %v", file, err)
+		}
+	}
+
+	items, total := service.Search("src/", 1, 1)
+	if total != 2 {
+		t.Fatalf("Search total = %d, want 2", total)
+	}
+	if len(items) != 1 || items[0].File != "src/http/server.go" {
+		t.Fatalf("Search page = %#v, want second src file", items)
+	}
+}
+
+func TestSearchDoesNotMatchSnapshotContent(t *testing.T) {
+	service := NewService(&memoryRepository{})
+	if _, _, err := service.Create("notes.txt", "secret needle"); err != nil {
+		t.Fatal(err)
+	}
+
+	items, total := service.Search("needle", 0, 10)
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("content search returned %#v with total %d", items, total)
+	}
+}
+
