@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -630,5 +632,88 @@ func TestInsertSnapshotsReturnsIDsInInputOrder(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] != 1 || ids[1] != 2 {
 		t.Fatalf("InsertSnapshots() IDs = %v, want [1 2]", ids)
+	}
+}
+
+func BenchmarkSnapshotInsert(b *testing.B) {
+	store, err := Open(filepath.Join(b.TempDir(), "insert-benchmark.db"))
+	if err != nil {
+		b.Fatalf("open benchmark database: %v", err)
+	}
+	defer store.Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		content := fmt.Sprintf("benchmark snapshot content %d", i)
+		sum := sha256.Sum256([]byte(content))
+		item := models.Snapshot{
+			File:      fmt.Sprintf("src/file-%d.go", i),
+			Content:   content,
+			Hash:      hex.EncodeToString(sum[:]),
+			CreatedAt: time.Now().UTC(),
+		}
+		if _, err := store.InsertSnapshot(item); err != nil {
+			b.Fatalf("insert snapshot %d: %v", i, err)
+		}
+	}
+}
+
+func BenchmarkSnapshotLoadAll(b *testing.B) {
+	store, err := Open(filepath.Join(b.TempDir(), "load-benchmark.db"))
+	if err != nil {
+		b.Fatalf("open benchmark database: %v", err)
+	}
+	defer store.Close()
+
+	const seedCount = 1000
+	items := make([]models.Snapshot, seedCount)
+	for i := range items {
+		content := fmt.Sprintf("benchmark snapshot content %d", i)
+		sum := sha256.Sum256([]byte(content))
+		items[i] = models.Snapshot{
+			File:      fmt.Sprintf("src/file-%d.go", i),
+			Content:   content,
+			Hash:      hex.EncodeToString(sum[:]),
+			CreatedAt: time.Now().UTC(),
+		}
+	}
+	if _, err := store.InsertSnapshots(items); err != nil {
+		b.Fatalf("seed benchmark database: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := store.LoadAllSnapshots(); err != nil {
+			b.Fatalf("load snapshots: %v", err)
+		}
+	}
+}
+
+func BenchmarkSnapshotInsertSharedContent(b *testing.B) {
+	store, err := Open(filepath.Join(b.TempDir(), "shared-content-benchmark.db"))
+	if err != nil {
+		b.Fatalf("open benchmark database: %v", err)
+	}
+	defer store.Close()
+
+	content := "one immutable payload shared by many snapshots"
+	sum := sha256.Sum256([]byte(content))
+	hash := hex.EncodeToString(sum[:])
+	createdAt := time.Now().UTC()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		item := models.Snapshot{
+			File:      fmt.Sprintf("src/file-%d.go", i),
+			Content:   content,
+			Hash:      hash,
+			CreatedAt: createdAt,
+		}
+		if _, err := store.InsertSnapshot(item); err != nil {
+			b.Fatalf("insert snapshot %d: %v", i, err)
+		}
 	}
 }
