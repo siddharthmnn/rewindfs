@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"path"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -401,7 +401,7 @@ func (w *Watcher) ignored(path string) bool {
 			continue
 		}
 		if strings.Contains(rule, "/") {
-			if matched, _ := path.Match(rule, slashPath); matched {
+			if matched, _ := pathpkg.Match(rule, slashPath); matched {
 				return true
 			}
 			continue
