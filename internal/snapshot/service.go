@@ -19,15 +19,12 @@ var (
 	ErrInvalidRepositoryID = errors.New("repository returned an invalid snapshot ID")
 )
 
-// Repository is the persistence boundary used by the snapshot service.
-// InsertSnapshot returns the database-assigned ID.
 type Repository interface {
 	InsertSnapshot(models.Snapshot) (int, error)
 	LoadAllSnapshots() ([]models.Snapshot, error)
 	DeleteSnapshot(int) error
 }
 
-// Service owns snapshot lifecycle rules and the in-memory indexes used by readers.
 type Service struct {
 	mu        sync.RWMutex
 	repo      Repository
@@ -50,8 +47,7 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-// Load rebuilds the in-memory indexes from the repository. Existing state is
-// replaced only after the complete read has succeeded.
+// Load rebuilds all indexes and swaps them in only after the full read passes.
 func (s *Service) Load() error {
 	if s.repo == nil {
 		return errors.New("snapshot repository is not configured")
@@ -68,7 +64,6 @@ func (s *Service) Load() error {
 
 	byID := make(map[int]models.Snapshot, len(loaded))
 	byFile := make(map[string][]models.Snapshot)
-
 	for _, item := range loaded {
 		if item.ID <= 0 {
 			return fmt.Errorf("load snapshots: invalid snapshot ID %d", item.ID)
@@ -76,23 +71,18 @@ func (s *Service) Load() error {
 		if _, exists := byID[item.ID]; exists {
 			return fmt.Errorf("load snapshots: duplicate snapshot ID %d", item.ID)
 		}
-
 		byID[item.ID] = item
 		byFile[item.File] = append(byFile[item.File], item)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	s.snapshots = append([]models.Snapshot(nil), loaded...)
 	s.byID = byID
 	s.byFile = byFile
 	return nil
 }
 
-// Create stores a snapshot before publishing it to the in-memory indexes.
-// The created flag is false when the latest snapshot for the same file already
-// has identical content.
 func (s *Service) Create(file, content string) (models.Snapshot, bool, error) {
 	if strings.TrimSpace(file) == "" {
 		return models.Snapshot{}, false, ErrInvalidFile
@@ -108,11 +98,8 @@ func (s *Service) Create(file, content string) (models.Snapshot, bool, error) {
 	defer s.mu.Unlock()
 
 	history := s.byFile[file]
-	if len(history) > 0 {
-		latest := history[len(history)-1]
-		if latest.Hash == hash {
-			return latest, false, nil
-		}
+	if len(history) > 0 && history[len(history)-1].Hash == hash {
+		return history[len(history)-1], false, nil
 	}
 
 	item := models.Snapshot{
@@ -134,12 +121,9 @@ func (s *Service) Create(file, content string) (models.Snapshot, bool, error) {
 	s.snapshots = append(s.snapshots, item)
 	s.byID[item.ID] = item
 	s.byFile[file] = append(history, item)
-
 	return item, true, nil
 }
 
-// Delete removes a snapshot from memory only after the repository confirms the
-// deletion. ID allocation remains the repository's responsibility.
 func (s *Service) Delete(id int) error {
 	if s.repo == nil {
 		return errors.New("snapshot repository is not configured")
@@ -152,13 +136,11 @@ func (s *Service) Delete(id int) error {
 	if !exists {
 		return ErrNotFound
 	}
-
 	if err := s.repo.DeleteSnapshot(id); err != nil {
 		return fmt.Errorf("delete snapshot: %w", err)
 	}
 
 	delete(s.byID, id)
-
 	for i := range s.snapshots {
 		if s.snapshots[i].ID == id {
 			s.snapshots = append(s.snapshots[:i], s.snapshots[i+1:]...)
@@ -178,14 +160,12 @@ func (s *Service) Delete(id int) error {
 	} else {
 		s.byFile[item.File] = history
 	}
-
 	return nil
 }
 
 func (s *Service) Get(id int) (models.Snapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	item, exists := s.byID[id]
 	return item, exists
 }
@@ -193,21 +173,46 @@ func (s *Service) Get(id int) (models.Snapshot, bool) {
 func (s *Service) All() []models.Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	return append([]models.Snapshot{}, s.snapshots...)
+}
+
+// Search filters by workspace-relative file key and returns a stable ID-ordered
+// page. Content is deliberately not searched so snippets cannot leak file data.
+func (s *Service) Search(query string, offset, limit int) ([]models.Snapshot, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	matches := make([]models.Snapshot, 0)
+	for _, item := range s.snapshots {
+		if query == "" || strings.Contains(strings.ToLower(item.File), query) {
+			matches = append(matches, item)
+		}
+	}
+
+	total := len(matches)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= total {
+		return []models.Snapshot{}, total
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return append([]models.Snapshot(nil), matches[offset:end]...), total
 }
 
 func (s *Service) ByFile(file string) []models.Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	return append([]models.Snapshot{}, s.byFile[file]...)
 }
 
 func (s *Service) Latest(file string) (models.Snapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	history := s.byFile[file]
 	if len(history) == 0 {
 		return models.Snapshot{}, false
@@ -218,7 +223,6 @@ func (s *Service) Latest(file string) (models.Snapshot, bool) {
 func (s *Service) Oldest(file string) (models.Snapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	history := s.byFile[file]
 	if len(history) == 0 {
 		return models.Snapshot{}, false
@@ -229,14 +233,12 @@ func (s *Service) Oldest(file string) (models.Snapshot, bool) {
 func (s *Service) Exists(file string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	return len(s.byFile[file]) > 0
 }
 
 func (s *Service) Files() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
 	files := make([]string, 0, len(s.byFile))
 	for file := range s.byFile {
 		files = append(files, file)
@@ -253,7 +255,6 @@ func (s *Service) Stats() Stats {
 	for _, item := range s.snapshots {
 		hashes[item.Hash] = struct{}{}
 	}
-
 	return Stats{
 		TotalSnapshots: len(s.snapshots),
 		TrackedFiles:   len(s.byFile),
