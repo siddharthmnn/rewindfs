@@ -56,7 +56,7 @@ The feature list below describes what is in the repo right now. It is still a le
 - [ ] Improve diff output beyond whole-content replacement.
 - [ ] Finish dashboard history, restore, delete, and error states.
 - [ ] Add metadata indexing and snapshot search.
-- [ ] Add a CLI.
+- [x] Add a Go CLI backed by the local HTTP API.
 - [ ] Support directory rollback and multiple watch roots.
 - [ ] Evaluate content-addressed blob storage and garbage collection.
 
@@ -160,6 +160,23 @@ SQLite uses WAL journaling and a five-second busy timeout. The schema is version
 The application uses SQLite through `github.com/mattn/go-sqlite3`, which requires CGO and a C compiler in environments where the driver is built from source.
 
 ---
+
+
+## Command-line interface
+
+The CLI talks to the running local RewindFS API. Start the application in one terminal, then run commands from another terminal:
+
+```bash
+go run ./cmd/rewindfs status
+go run ./cmd/rewindfs files
+go run ./cmd/rewindfs snapshots
+go run ./cmd/rewindfs history src/main.go
+go run ./cmd/rewindfs diff 12 18
+go run ./cmd/rewindfs restore 12
+go run ./cmd/rewindfs recover src/main.go
+```
+
+Restore, recovery, and deletion ask for confirmation. Add `--yes` to restore or recover when running an intentional scripted operation. Set `REWINDFS_API` to use another API address; the default is `http://127.0.0.1:8080`.
 
 ## Tech
 

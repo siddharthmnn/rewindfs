@@ -30,7 +30,7 @@ Snapshot creation and deletion are serialized by the service. Read operations us
 | `internal/storage` | SQLite connection lifecycle, schema migrations, and snapshot persistence |\n| `internal/workspace` | Workspace-root path validation and atomic restore/recovery writes |
 | `internal/vfs` | Filesystem event monitoring |
 | `internal/diff` | Bounded line-oriented snapshot comparison |
-| `frontend` | Browser dashboard |
+| `frontend` | Browser dashboard |\n| `internal/client` | HTTP client used by the CLI |\n| `cmd/rewindfs` | Command-line interface over the local API |
 
 The snapshot service depends on a small repository interface. The API package supplies the SQLite-backed implementation, while service tests use an in-memory repository. Storage tests open independent temporary database files, so test runs do not share or overwrite a developer's runtime database.
 
@@ -78,9 +78,9 @@ The current schema stores file path, content, hash, and creation time in the sam
 
 - The service watches one workspace root per process.
 - Snapshot content is stored in SQLite rows; content-addressed blobs and garbage collection are not implemented.
-- The CLI and snapshot archive import/export workflows are not implemented.
+- Snapshot archive import/export workflows are not implemented.
 - The line diff uses a bounded LCS table and falls back to a full replacement for very large line combinations.
 - Workspace path checks reject existing symlinks and traversal, but path-based checks cannot fully prevent a hostile local process from swapping directory entries between checks.
-- The API is intentionally local-only. Remote access needs authentication and a separate deployment model.
+- The API is intentionally local-only. Remote access needs authentication and a separate deployment model. The CLI is an API client and does not open SQLite or write directly to the workspace.
 
 These are deliberate boundaries, not hidden capabilities. New storage formats, remote access, and additional executables should be added with independent migrations and tests.
