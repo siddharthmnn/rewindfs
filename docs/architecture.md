@@ -14,8 +14,8 @@ An earlier `backend/` directory contained a separate Go module, a second SQLite 
 2. Only after initialization succeeds, the recursive filesystem watcher starts. It watches directories under the selected root and skips Git metadata, Node dependencies, and common SQLite/runtime files.
 3. The watcher debounces create/write/rename events, reads the settled file, and submits it using a slash-separated path relative to the watch root.
 4. `internal/api` maps HTTP requests to the snapshot service. `internal/snapshot` validates the file key, calculates the SHA-256 hash, checks the latest version for duplicates, and coordinates persistence.
-5. `internal/storage` owns a `Store` instance. It applies schema migrations transactionally, writes snapshot metadata and shared content blobs, and returns the ID assigned by SQLite. The service updates its in-memory indexes only after the insert succeeds.
-6. The API exposes history and lookup routes, workspace-safe restore/recovery, file-path search, and a local maintenance route for blob collection.
+5. `internal/storage` owns a `Store` instance. It applies schema migrations transactionally, writes snapshot metadata and shared content blobs, and returns IDs assigned by SQLite. Single writes and archive imports use the same blob/reference rules; an import batch commits as one transaction.
+6. The API exposes history and lookup routes, workspace-safe restore/recovery, file-path search, a local maintenance route for blob collection, and versioned history archive import/export.
 7. The dashboard in `frontend/` reads snapshot, history, statistics, search, and diff data through the HTTP API.
 
 Snapshot creation and deletion are serialized by the service. Read operations use a read lock and return copies of stored values so callers cannot mutate the service's indexes.
@@ -26,6 +26,7 @@ Snapshot creation and deletion are serialized by the service. Read operations us
 |---|---|
 | `main.go` | Initialize the application, start the watcher, and run the API server |
 | `internal/api` | HTTP routes, request/response mapping, application initialization, and the SQLite repository adapter |
+| `internal/archive` | Versioned ZIP manifest, deduplicated blob entries, archive validation, and size limits |
 | `internal/snapshot` | Snapshot lifecycle, hashing, duplicate checks, indexes, and concurrency control |
 | `internal/models` | Snapshot data model |
 | `internal/storage` | SQLite connection lifecycle, schema migrations, snapshot metadata, content blobs, and blob collection |
@@ -82,8 +83,8 @@ The v2 schema separates `snapshots` metadata from `content_blobs`. Each metadata
 ## Current boundaries
 
 - The service watches one workspace root per process.
-- Snapshot archive import/export workflows are not implemented.
-- The line diff uses a bounded LCS table and falls back to a full replacement for very large line combinations.
+- Snapshot archives use a versioned ZIP manifest and SHA-256 blob entries. Import assigns new local snapshot IDs and restores history only; it does not write files into the workspace.
+- The line diff uses a bounded LCS table and falls back to a full replacement for very large line combinations. Archive import/export currently has fixed 64 MiB compressed and 128 MiB uncompressed limits.
 - Workspace path checks reject existing symlinks and traversal, but path-based checks cannot fully prevent a hostile local process from swapping directory entries between checks.
 - The API is intentionally local-only. Remote access needs authentication and a separate deployment model. The CLI is an API client and does not open SQLite or write directly to the workspace.
 

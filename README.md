@@ -93,6 +93,8 @@ The server listens on `127.0.0.1:8080` by default. It accepts the local `127.0.0
 | GET | `/snapshots/file?file=src/main.go` | List snapshots for a file |
 | GET | `/snapshot/:id` | Get one snapshot |
 | POST | `/maintenance/gc` | Repair blob references and remove unreferenced content |
+| GET | `/export` | Download a versioned snapshot archive |
+| POST | `/import` | Validate and import snapshot history from an archive |
 | POST | `/snapshot` | Create a snapshot |
 | DELETE | `/snapshot/:id` | Delete a snapshot |
 | GET | `/latest?file=src/main.go` | Get the latest snapshot |
@@ -104,7 +106,7 @@ The server listens on `127.0.0.1:8080` by default. It accepts the local `127.0.0
 | POST | `/recover?file=src/main.go` | Recover a file from its latest snapshot |
 | GET | `/diff/:id1/:id2` | Compare two snapshots |
 
-The older single-segment routes are still available. use the query form for nested files. Snapshot search returns `items`, `total`, `limit`, and `offset`; search matches file paths, not snapshot contents.
+The older single-segment routes are still available. use the query form for nested files. Snapshot search returns `items`, `total`, `limit`, and `offset`; search matches file paths, not snapshot contents. Archive import returns `imported`, `skipped`, and the new local `snapshot_ids`.
 
 ### Create a snapshot
 
@@ -178,9 +180,23 @@ go run ./cmd/rewindfs diff 12 18
 go run ./cmd/rewindfs restore 12
 go run ./cmd/rewindfs recover src/main.go
 go run ./cmd/rewindfs gc
+go run ./cmd/rewindfs export ./backups/rewindfs.zip
+go run ./cmd/rewindfs import ./backups/rewindfs.zip
 ```
 
-Restore, recovery, deletion, and garbage collection ask for confirmation. Add `--yes` to restore, recover, or garbage collection when running an intentional scripted operation. Set `REWINDFS_API` to use another API address; the default is `http://127.0.0.1:8080`.
+Restore, recovery, deletion, garbage collection, archive import, and overwriting an existing export ask for confirmation. Add `--yes` to restore, recover, garbage collection, or archive import when running an intentional scripted operation. Set `REWINDFS_API` to use another API address; the default is `http://127.0.0.1:8080`.
+
+
+### Snapshot archives
+
+Export and import preserve snapshot history, timestamps, file keys, and content hashes in a versioned ZIP format. Identical content is stored once in the archive. Import assigns new local snapshot IDs, skips consecutive duplicates, validates every file key and blob checksum, and commits the batch in one SQLite transaction. It does **not** write imported file contents into the workspace; use restore or recover after importing when you actually want to materialize a version.
+
+```bash
+go run ./cmd/rewindfs export ./backups/rewindfs.zip
+go run ./cmd/rewindfs import ./backups/rewindfs.zip
+```
+
+Archive uploads and downloads are limited to 64 MiB. The importer also checks the manifest version, ZIP entry names, decompressed sizes, SHA-256 values, and path traversal attempts.
 
 ## Tech
 
