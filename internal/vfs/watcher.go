@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"os"
 	pathpkg "path"
 	"path/filepath"
@@ -100,7 +100,7 @@ func NewWatcherWithIgnore(root string, snapshot SnapshotFunc, ignorePatterns []s
 		return nil, fmt.Errorf("watch directory tree: %w", err)
 	}
 
-	log.Printf("watching %s", absoluteRoot)
+	slog.Info("watching workspace", "root", absoluteRoot)
 	return w, nil
 }
 
@@ -140,7 +140,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			log.Printf("filesystem watcher error: %v", err)
+			slog.Warn("filesystem watcher error", "error", err)
 		}
 	}
 }
@@ -189,7 +189,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	if err == nil && info.IsDir() {
 		if event.Op&(fsnotify.Create|fsnotify.Rename) != 0 {
 			if err := w.addTree(path, true); err != nil {
-				log.Printf("watch new directory %q: %v", path, err)
+				slog.Warn("watch new directory failed", "path", path, "error", err)
 			}
 		}
 		return
@@ -332,7 +332,7 @@ func (w *Watcher) snapshotFile(path, relative string, token uint64) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			log.Printf("inspect changed file %q: %v", relative, err)
+			slog.Warn("inspect changed file failed", "file", relative, "error", err)
 		}
 		return
 	}
@@ -342,17 +342,17 @@ func (w *Watcher) snapshotFile(path, relative string, token uint64) {
 
 	content, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("read changed file %q: %v", relative, err)
+		slog.Warn("read changed file failed", "file", relative, "error", err)
 		return
 	}
 
 	created, err := w.snapshot(filepath.ToSlash(relative), string(content))
 	if err != nil {
-		log.Printf("snapshot changed file %q: %v", relative, err)
+		slog.Error("snapshot changed file failed", "file", relative, "error", err)
 		return
 	}
 	if created {
-		log.Printf("snapshot created: %s", filepath.ToSlash(relative))
+		slog.Info("snapshot created", "file", filepath.ToSlash(relative))
 	}
 }
 
