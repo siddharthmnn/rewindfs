@@ -1,18 +1,12 @@
 package api
 
 import (
-	"os"
-	"strings"
 	"sync"
 
+	"rewindfs/internal/config"
 	"rewindfs/internal/snapshot"
 	"rewindfs/internal/storage"
 	"rewindfs/internal/workspace"
-)
-
-const (
-	defaultDatabasePath = "rewindfs.db"
-	defaultWorkspacePath = "."
 )
 
 var (
@@ -26,21 +20,16 @@ var (
 // Initialize opens the database and workspace used by the watcher and API.
 // REWINDFS_DB_PATH and REWINDFS_ROOT can both be set to use custom locations.
 func Initialize() error {
-	databasePath := strings.TrimSpace(os.Getenv("REWINDFS_DB_PATH"))
-	if databasePath == "" {
-		databasePath = defaultDatabasePath
+	cfg, err := config.Load()
+	if err != nil {
+		return err
 	}
-	rootPath := strings.TrimSpace(os.Getenv("REWINDFS_ROOT"))
-	if rootPath == "" {
-		rootPath = defaultWorkspacePath
-	}
-
-	return InitializeWithPaths(databasePath, rootPath)
+	return InitializeWithPaths(cfg.DatabasePath, cfg.WorkspaceRoot)
 }
 
 // InitializeWithDBPath keeps the older test and caller entry point.
 func InitializeWithDBPath(path string) error {
-	return InitializeWithPaths(path, defaultWorkspacePath)
+	return InitializeWithPaths(path, ".")
 }
 
 // InitializeWithPaths initializes the database and canonical workspace root.
