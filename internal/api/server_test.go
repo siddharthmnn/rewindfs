@@ -35,14 +35,21 @@ func newTestRouter(t *testing.T) (*httptest.ResponseRecorder, string) {
 	return httptest.NewRecorder(), root
 }
 
-func TestSnapshotRejectsUnsafePath(t *testing.T) {
-	recorder, root := newTestRouter(t)
-	request := httptest.NewRequest(http.MethodPost, "/snapshot", strings.NewReader(
-		`{"file":"../outside.txt","content":"not allowed"}`,
-	))
-	request.Header.Set("Content-Type", "application/json")
-
+func sendAPIRequest(method, target, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, target, strings.NewReader(body))
+	request.Host = serverAddress
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	recorder := httptest.NewRecorder()
 	newRouter().ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestSnapshotRejectsUnsafePath(t *testing.T) {
+	_, root := newTestRouter(t)
+	recorder := sendAPIRequest(http.MethodPost, "/snapshot",
+		`{"file":"../outside.txt","content":"not allowed"}`)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
@@ -53,15 +60,13 @@ func TestSnapshotRejectsUnsafePath(t *testing.T) {
 }
 
 func TestNestedHistoryQuery(t *testing.T) {
-	recorder, _ := newTestRouter(t)
+	_, _ = newTestRouter(t)
 	item := models.Snapshot{File: "src/main.go", Content: "package main"}
 	if _, err := AddSnapshot(&item); err != nil {
 		t.Fatalf("add snapshot: %v", err)
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/history?file=src%2Fmain.go", nil)
-	newRouter().ServeHTTP(recorder, request)
-
+	recorder := sendAPIRequest(http.MethodGet, "/history?file=src%2Fmain.go", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -74,8 +79,89 @@ func TestNestedHistoryQuery(t *testing.T) {
 	}
 }
 
+func TestSnapshotLifecycleThroughHTTP(t *testing.T) {
+	_, root := newTestRouter(t)
+
+	firstResponse := sendAPIRequest(http.MethodPost, "/snapshot",
+		`{"file":"src/main.go","content":"package main\n\nfunc main() {}\n"}`)
+	if firstResponse.Code != http.StatusCreated {
+		t.Fatalf("create first snapshot: status %d, body %s", firstResponse.Code, firstResponse.Body.String())
+	}
+	var first models.Snapshot
+	if err := json.Unmarshal(firstResponse.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode first snapshot: %v", err)
+	}
+
+	secondResponse := sendAPIRequest(http.MethodPost, "/snapshot",
+		`{"file":"src/main.go","content":"package main\n\nfunc main() { println(\"ok\") }\n"}`)
+	if secondResponse.Code != http.StatusCreated {
+		t.Fatalf("create second snapshot: status %d, body %s", secondResponse.Code, secondResponse.Body.String())
+	}
+	var second models.Snapshot
+	if err := json.Unmarshal(secondResponse.Body.Bytes(), &second); err != nil {
+		t.Fatalf("decode second snapshot: %v", err)
+	}
+	if second.ID <= first.ID {
+		t.Fatalf("snapshot IDs did not increase: first %d, second %d", first.ID, second.ID)
+	}
+
+	history := sendAPIRequest(http.MethodGet, "/history?file=src%2Fmain.go", "")
+	var entries []map[string]any
+	if history.Code != http.StatusOK || json.Unmarshal(history.Body.Bytes(), &entries) != nil || len(entries) != 2 {
+		t.Fatalf("history response = %d %s", history.Code, history.Body.String())
+	}
+
+	diffResponse := sendAPIRequest(http.MethodGet,
+		"/diff/"+strconv.Itoa(first.ID)+"/"+strconv.Itoa(second.ID), "")
+	if diffResponse.Code != http.StatusOK || !strings.Contains(diffResponse.Body.String(), "-func main() {}") ||
+		!strings.Contains(diffResponse.Body.String(), "+func main() { println") {
+		t.Fatalf("unexpected diff response: %d %s", diffResponse.Code, diffResponse.Body.String())
+	}
+
+	restore := sendAPIRequest(http.MethodPost, "/restore/"+strconv.Itoa(first.ID), "")
+	if restore.Code != http.StatusOK {
+		t.Fatalf("restore status = %d, body = %s", restore.Code, restore.Body.String())
+	}
+	restored, err := os.ReadFile(filepath.Join(root, "src", "main.go"))
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if string(restored) != "package main\n\nfunc main() {}\n" {
+		t.Fatalf("restored content = %q", restored)
+	}
+
+	deleted := sendAPIRequest(http.MethodDelete, "/snapshot/"+strconv.Itoa(first.ID), "")
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", deleted.Code, deleted.Body.String())
+	}
+	if _, exists := snapshotService.Get(first.ID); exists {
+		t.Fatal("deleted snapshot remains in the in-memory index")
+	}
+}
+
+func TestRecoveryRecreatesMissingNestedFile(t *testing.T) {
+	_, root := newTestRouter(t)
+	item := models.Snapshot{File: "src/internal/main.go", Content: "package main"}
+	if _, err := AddSnapshot(&item); err != nil {
+		t.Fatalf("add snapshot: %v", err)
+	}
+
+	recorder := sendAPIRequest(http.MethodPost, "/recover?file=src%2Finternal%2Fmain.go", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("recover status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "src", "internal", "main.go"))
+	if err != nil {
+		t.Fatalf("read recovered file: %v", err)
+	}
+	if string(got) != item.Content {
+		t.Fatalf("recovered content = %q, want %q", got, item.Content)
+	}
+}
+
 func TestRestoreRejectsUnsafeHistoricalPath(t *testing.T) {
-	recorder, root := newTestRouter(t)
+	_, root := newTestRouter(t)
 	outsideName := filepath.Base(root) + "-outside.txt"
 	outsidePath := filepath.Join(filepath.Dir(root), outsideName)
 	item, _, err := snapshotService.Create("../"+outsideName, "do not write")
@@ -83,9 +169,7 @@ func TestRestoreRejectsUnsafeHistoricalPath(t *testing.T) {
 		t.Fatalf("add historical record: %v", err)
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/restore/"+strconv.Itoa(item.ID), nil)
-	newRouter().ServeHTTP(recorder, request)
-
+	recorder := sendAPIRequest(http.MethodPost, "/restore/"+strconv.Itoa(item.ID), "")
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
@@ -95,17 +179,15 @@ func TestRestoreRejectsUnsafeHistoricalPath(t *testing.T) {
 }
 
 func TestDebugDatabaseRouteIsGone(t *testing.T) {
-	recorder, _ := newTestRouter(t)
-	request := httptest.NewRequest(http.MethodGet, "/debug-db", nil)
-	newRouter().ServeHTTP(recorder, request)
-
+	_, _ = newTestRouter(t)
+	recorder := sendAPIRequest(http.MethodGet, "/debug-db", "")
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
 	}
 }
 
 func TestSnapshotPayloadDoesNotAcceptSymlinkPath(t *testing.T) {
-	recorder, root := newTestRouter(t)
+	_, root := newTestRouter(t)
 	outside := filepath.Join(t.TempDir(), "outside.txt")
 	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
@@ -114,24 +196,22 @@ func TestSnapshotPayloadDoesNotAcceptSymlinkPath(t *testing.T) {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
 
-	body := map[string]string{"file": "linked.txt", "content": "overwrite"}
-	payload, err := json.Marshal(body)
+	payload, err := json.Marshal(map[string]string{"file": "linked.txt", "content": "overwrite"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/snapshot", bytes.NewReader(payload))
-	request.Header.Set("Content-Type", "application/json")
-	newRouter().ServeHTTP(recorder, request)
-
+	recorder := sendAPIRequest(http.MethodPost, "/snapshot", string(payload))
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestAPIBlocksCrossOriginRequests(t *testing.T) {
-	recorder, _ := newTestRouter(t)
+	_, _ = newTestRouter(t)
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request.Host = serverAddress
 	request.Header.Set("Origin", "https://attacker.example")
+	recorder := httptest.NewRecorder()
 	newRouter().ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusForbidden {
@@ -140,13 +220,14 @@ func TestAPIBlocksCrossOriginRequests(t *testing.T) {
 }
 
 func TestAPIAcceptsSameOriginSnapshotRequest(t *testing.T) {
-	recorder, _ := newTestRouter(t)
+	_, _ = newTestRouter(t)
 	request := httptest.NewRequest(http.MethodPost, "/snapshot", strings.NewReader(
 		`{"file":"notes.txt","content":"hello"}`,
 	))
+	request.Host = serverAddress
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Origin", "http://127.0.0.1:8080")
-	request.Host = "127.0.0.1:8080"
+	request.Header.Set("Origin", "http://"+serverAddress)
+	recorder := httptest.NewRecorder()
 	newRouter().ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusCreated {
@@ -154,12 +235,86 @@ func TestAPIAcceptsSameOriginSnapshotRequest(t *testing.T) {
 	}
 }
 
-func TestAPIDoesNotAddWildcardCORSHeaders(t *testing.T) {
-	recorder, _ := newTestRouter(t)
+func TestAPIRejectsUnexpectedHostHeader(t *testing.T) {
+	_, _ = newTestRouter(t)
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request.Host = "rewindfs.attacker.example"
+	recorder := httptest.NewRecorder()
+	newRouter().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+}
+
+func TestAPIDoesNotAddWildcardCORSHeaders(t *testing.T) {
+	_, _ = newTestRouter(t)
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request.Host = serverAddress
+	recorder := httptest.NewRecorder()
 	newRouter().ServeHTTP(recorder, request)
 
 	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("CORS origin header = %q, want no CORS header", got)
+	}
+}
+
+func TestSnapshotSearchEndpointFiltersAndPaginates(t *testing.T) {
+	_, _ = newTestRouter(t)
+	for _, file := range []string{"src/main.go", "src/http/server.go", "docs/readme.md"} {
+		item := models.Snapshot{File: file, Content: file}
+		if _, err := AddSnapshot(&item); err != nil {
+			t.Fatalf("add snapshot %q: %v", file, err)
+		}
+	}
+
+	recorder := sendAPIRequest(http.MethodGet, "/snapshots/search?q=src%2F&limit=1&offset=1", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("search status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		Items  []models.Snapshot `json:"items"`
+		Total  int                `json:"total"`
+		Limit  int                `json:"limit"`
+		Offset int                `json:"offset"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode search response: %v", err)
+	}
+	if result.Total != 2 || result.Limit != 1 || result.Offset != 1 || len(result.Items) != 1 {
+		t.Fatalf("unexpected search response: %#v", result)
+	}
+	if result.Items[0].File != "src/http/server.go" {
+		t.Fatalf("search returned %q, want src/http/server.go", result.Items[0].File)
+	}
+}
+
+func TestSnapshotSearchRejectsInvalidPagination(t *testing.T) {
+	_, _ = newTestRouter(t)
+	recorder := sendAPIRequest(http.MethodGet, "/snapshots/search?limit=1000", "")
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestSnapshotRequestBodyLimit(t *testing.T) {
+	_, _ = newTestRouter(t)
+	body := `{"file":"large.txt","content":"` + strings.Repeat("x", maxRequestBodyBytes) + `"}`
+	recorder := sendAPIRequest(http.MethodPost, "/snapshot", body)
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+
+func TestSnapshotBodyCanBeDecodedFromBytes(t *testing.T) {
+	_, _ = newTestRouter(t)
+	payload := []byte(`{"file":"bytes.txt","content":"hello"}`)
+	request := httptest.NewRequest(http.MethodPost, "/snapshot", bytes.NewReader(payload))
+	request.Host = serverAddress
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	newRouter().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
