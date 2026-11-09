@@ -52,6 +52,7 @@ The server watches the current directory by default. It creates
 | `REWINDFS_IGNORE` | empty | Comma-separated ignore patterns, in addition to built-in exclusions |
 | `REWINDFS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `REWINDFS_LOG_FORMAT` | `text` | `text` or `json` structured log output |
+| `REWINDFS_MAX_REQUEST_BODY_BYTES` | `16777216` | JSON request body limit, from 1 KiB to 256 MiB; archive imports keep a separate 64 MiB cap |
 
 Example:
 
@@ -61,6 +62,7 @@ REWINDFS_DB_PATH="$HOME/.local/share/rewindfs/demo.db" \
 REWINDFS_IGNORE="*.log,build/,vendor/" \
 REWINDFS_LOG_LEVEL=debug \
 REWINDFS_LOG_FORMAT=json \
+REWINDFS_MAX_REQUEST_BODY_BYTES=33554432 \
 ./rewindfs-server
 ```
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"sync"
 
 	"rewindfs/internal/config"
@@ -17,14 +18,13 @@ var (
 	workspaceRoot   *workspace.Root
 )
 
-// Initialize opens the database and workspace used by the watcher and API.
-// REWINDFS_DB_PATH and REWINDFS_ROOT can both be set to use custom locations.
+// Initialize opens the database and workspace using the configured environment.
 func Initialize() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	return InitializeWithPaths(cfg.DatabasePath, cfg.WorkspaceRoot)
+	return InitializeWithConfig(cfg)
 }
 
 // InitializeWithDBPath keeps the older test and caller entry point.
@@ -32,22 +32,36 @@ func InitializeWithDBPath(path string) error {
 	return InitializeWithPaths(path, ".")
 }
 
-// InitializeWithPaths initializes the database and canonical workspace root.
-// Repeated calls are idempotent until Close is called.
+// InitializeWithPaths initializes the database and canonical workspace root
+// with the default request body limit.
 func InitializeWithPaths(databasePath, rootPath string) error {
+	return InitializeWithConfig(config.Config{
+		DatabasePath:        databasePath,
+		WorkspaceRoot:       rootPath,
+		MaxRequestBodyBytes: config.DefaultRequestBodyLimit,
+	})
+}
+
+// InitializeWithConfig starts the application using one validated config.
+// Repeated calls are idempotent until Close is called.
+func InitializeWithConfig(cfg config.Config) error {
 	initializeMu.Lock()
 	defer initializeMu.Unlock()
 
 	if initialized {
 		return nil
 	}
+	if cfg.MaxRequestBodyBytes < config.MinRequestBodyLimit ||
+		cfg.MaxRequestBodyBytes > config.MaxRequestBodyLimit {
+		return errors.New("request body limit is outside the supported range")
+	}
 
-	root, err := workspace.NewRoot(rootPath)
+	root, err := workspace.NewRoot(cfg.WorkspaceRoot)
 	if err != nil {
 		return err
 	}
 
-	store, err := storage.Open(databasePath)
+	store, err := storage.Open(cfg.DatabasePath)
 	if err != nil {
 		return err
 	}
@@ -61,6 +75,7 @@ func InitializeWithPaths(databasePath, rootPath string) error {
 	databaseStore = store
 	snapshotService = service
 	workspaceRoot = root
+	maxRequestBodyBytes = cfg.MaxRequestBodyBytes
 	initialized = true
 	return nil
 }
@@ -85,6 +100,7 @@ func Close() error {
 	snapshotService = nil
 	workspaceRoot = nil
 	initialized = false
+	maxRequestBodyBytes = config.DefaultRequestBodyLimit
 
 	if store == nil {
 		return nil

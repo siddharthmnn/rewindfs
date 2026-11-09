@@ -14,6 +14,7 @@ import (
 	"time"
 
 	snapshotarchive "rewindfs/internal/archive"
+	"rewindfs/internal/config"
 	"rewindfs/internal/models"
 )
 
@@ -301,7 +302,7 @@ func TestSnapshotSearchRejectsInvalidPagination(t *testing.T) {
 
 func TestSnapshotRequestBodyLimit(t *testing.T) {
 	_, _ = newTestRouter(t)
-	body := `{"file":"large.txt","content":"` + strings.Repeat("x", maxRequestBodyBytes) + `"}`
+	body := `{"file":"large.txt","content":"` + strings.Repeat("x", int(maxRequestBodyBytes)) + `"}`
 	recorder := sendAPIRequest(http.MethodPost, "/snapshot", body)
 	if recorder.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusRequestEntityTooLarge)
@@ -493,5 +494,51 @@ func TestReadinessEndpointChecksApplicationDependencies(t *testing.T) {
 	if notReady.Code != http.StatusServiceUnavailable ||
 		!strings.Contains(notReady.Body.String(), `"status":"not_ready"`) {
 		t.Fatalf("not-ready status = %d, body = %s", notReady.Code, notReady.Body.String())
+	}
+}
+
+func TestSnapshotRequestBodyLimitCanBeConfigured(t *testing.T) {
+	if err := Close(); err != nil {
+		t.Fatalf("reset application: %v", err)
+	}
+	cfg := config.Config{
+		DatabasePath: filepath.Join(t.TempDir(), "rewindfs.db"),
+		WorkspaceRoot: t.TempDir(),
+		MaxRequestBodyBytes: 1024,
+	}
+	if err := InitializeWithConfig(cfg); err != nil {
+		t.Fatalf("initialize with custom request body limit: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := Close(); err != nil {
+			t.Errorf("close test application: %v", err)
+		}
+	})
+
+	body := `{"file":"large.txt","content":"` + strings.Repeat("x", 1100) + `"}`
+	recorder := sendAPIRequest(http.MethodPost, "/snapshot", body)
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+
+func TestInitializeUsesConfiguredRequestBodyLimit(t *testing.T) {
+	if err := Close(); err != nil {
+		t.Fatalf("reset application: %v", err)
+	}
+	t.Setenv("REWINDFS_DB_PATH", filepath.Join(t.TempDir(), "configured.db"))
+	t.Setenv("REWINDFS_ROOT", t.TempDir())
+	t.Setenv("REWINDFS_MAX_REQUEST_BODY_BYTES", "2048")
+
+	if err := Initialize(); err != nil {
+		t.Fatalf("initialize application: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := Close(); err != nil {
+			t.Errorf("close application: %v", err)
+		}
+	})
+	if maxRequestBodyBytes != 2048 {
+		t.Fatalf("request body limit = %d, want 2048", maxRequestBodyBytes)
 	}
 }

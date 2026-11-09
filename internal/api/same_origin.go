@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"rewindfs/internal/config"
 	snapshotarchive "rewindfs/internal/archive"
 )
 
-const maxRequestBodyBytes = 16 << 20
+var maxRequestBodyBytes int64 = config.DefaultRequestBodyLimit
 
 var localHosts = map[string]struct{}{
 	"127.0.0.1:8080": {},
@@ -43,7 +44,7 @@ func sameOrigin(c *gin.Context) {
 
 func limitRequestBody(c *gin.Context) {
 	if c.Request.Body != nil {
-		limit := int64(maxRequestBodyBytes)
+		limit := maxRequestBodyBytes
 		if c.Request.URL.Path == "/import" {
 			limit = snapshotarchive.MaxArchiveBytes
 		}
