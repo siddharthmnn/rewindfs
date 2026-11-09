@@ -73,7 +73,7 @@ func StartServerContext(ctx context.Context) error {
 
 func newRouter() *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery(), sameOrigin)
+	r.Use(gin.Logger(), gin.Recovery(), localHostOnly, sameOrigin, limitRequestBody)
 	r.Static("/frontend", "./frontend")
 
 	r.GET("/", func(c *gin.Context) {
@@ -121,6 +121,11 @@ func newRouter() *gin.Engine {
 	r.POST("/snapshot", func(c *gin.Context) {
 		var request models.Snapshot
 		if err := c.ShouldBindJSON(&request); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body is too large"})
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid snapshot payload"})
 			return
 		}
