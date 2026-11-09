@@ -1,0 +1,260 @@
+let selectedSnapshot1 = null;
+let selectedSnapshot2 = null;
+let currentSnapshotId = null;
+let currentFile = null;
+let allSnapshots = [];
+
+const byId = (id) => document.getElementById(id);
+
+async function getJSON(url, options) {
+    const response = await fetch(url, options);
+    let data = {};
+    try {
+        data = await response.json();
+    } catch (_) {
+        // keep the message below simple if the server did not return json
+    }
+    if (!response.ok) {
+        throw new Error(data.error || "request failed");
+    }
+    return data;
+}
+
+function showMessage(element, message) {
+    element.replaceChildren(document.createTextNode(message));
+}
+
+function addLabelValue(parent, label, value) {
+    const line = document.createElement("div");
+    const labelNode = document.createElement("strong");
+    labelNode.textContent = label + ": ";
+    line.append(labelNode, document.createTextNode(String(value ?? "")));
+    parent.appendChild(line);
+}
+
+function fileURL(endpoint, file) {
+    return endpoint + "?file=" + encodeURIComponent(file);
+}
+
+async function loadStats() {
+    const stats = await getJSON("/stats");
+    byId("stats").textContent =
+        "Total Snapshots: " + stats.total_snapshots + "\n" +
+        "Tracked Files: " + stats.tracked_files + "\n" +
+        "Unique Hashes: " + stats.unique_hashes;
+}
+
+async function loadFiles() {
+    const data = await getJSON("/files");
+    const filesList = byId("files");
+    filesList.replaceChildren();
+
+    if (!data.files || data.files.length === 0) {
+        const empty = document.createElement("li");
+        empty.textContent = "No tracked files";
+        filesList.appendChild(empty);
+        return;
+    }
+
+    data.files.forEach((file) => {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.className = "file-button";
+        button.textContent = file;
+        button.addEventListener("click", () => loadFileInfo(file));
+        item.appendChild(button);
+        filesList.appendChild(item);
+    });
+}
+
+function renderSnapshots(query = "") {
+    const container = byId("snapshots");
+    container.replaceChildren();
+
+    const normalized = query.trim().toLowerCase();
+    const visible = allSnapshots.filter((snapshot) =>
+        !normalized ||
+        snapshot.file.toLowerCase().includes(normalized) ||
+        String(snapshot.id).includes(normalized)
+    );
+
+    if (visible.length === 0) {
+        showMessage(container, allSnapshots.length === 0 ? "No snapshots yet" : "No matching snapshots");
+        return;
+    }
+
+    visible.slice().reverse().forEach((snapshot) => {
+        const row = document.createElement("div");
+        row.className = "snapshot-row";
+
+        const details = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = "Snapshot #" + snapshot.id;
+        const meta = document.createElement("div");
+        meta.className = "muted";
+        meta.textContent = snapshot.file + " · " + snapshot.created_at;
+        details.append(title, meta);
+
+        const open = document.createElement("button");
+        open.textContent = "Open";
+        open.addEventListener("click", () => loadSnapshot(snapshot.id));
+
+        row.append(details, open);
+        container.appendChild(row);
+    });
+}
+
+async function loadSnapshots() {
+    allSnapshots = await getJSON("/snapshots");
+    renderSnapshots(byId("snapshotSearch").value);
+}
+
+async function loadFileInfo(file) {
+    currentFile = file;
+    try {
+        const latest = await getJSON(fileURL("/snapshot-latest-id", file));
+        const count = await getJSON(fileURL("/snapshot-count", file));
+        const historyData = await getJSON(fileURL("/history", file));
+
+        const info = byId("fileInfo");
+        info.replaceChildren();
+        addLabelValue(info, "File", file);
+        addLabelValue(info, "Latest Snapshot ID", latest.latest_id);
+        addLabelValue(info, "Snapshot Count", count.count);
+
+        const recover = document.createElement("button");
+        recover.textContent = "Recover Latest Version";
+        recover.addEventListener("click", recoverSelectedFile);
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        actions.appendChild(recover);
+        info.appendChild(actions);
+
+        const history = byId("history");
+        history.replaceChildren();
+        historyData.forEach((snapshot) => {
+            const row = document.createElement("div");
+            row.className = "snapshot-link";
+            const open = document.createElement("button");
+            open.className = "file-button";
+            open.textContent = "Snapshot #" + snapshot.id;
+            open.addEventListener("click", () => loadSnapshot(snapshot.id));
+            const date = document.createElement("div");
+            date.className = "muted";
+            date.textContent = snapshot.created_at;
+            row.append(open, date);
+            history.appendChild(row);
+        });
+    } catch (error) {
+        showMessage(byId("fileInfo"), error.message);
+    }
+}
+
+async function loadSnapshot(id) {
+    try {
+        const snapshot = await getJSON("/snapshot/" + encodeURIComponent(id));
+        currentSnapshotId = id;
+        currentFile = snapshot.file;
+
+        if (selectedSnapshot1 === null) {
+            selectedSnapshot1 = id;
+        } else if (selectedSnapshot2 === null) {
+            selectedSnapshot2 = id;
+        } else {
+            selectedSnapshot1 = selectedSnapshot2;
+            selectedSnapshot2 = id;
+        }
+
+        const content = byId("snapshotContent");
+        content.replaceChildren();
+        addLabelValue(content, "Snapshot ID", snapshot.id);
+        addLabelValue(content, "File", snapshot.file);
+        const pre = document.createElement("pre");
+        pre.textContent = snapshot.content;
+        content.appendChild(pre);
+
+        if (selectedSnapshot1 !== null && selectedSnapshot2 !== null) {
+            const diffData = await getJSON(
+                "/diff/" + encodeURIComponent(selectedSnapshot1) + "/" + encodeURIComponent(selectedSnapshot2)
+            );
+            const viewer = byId("diffViewer");
+            viewer.replaceChildren();
+            addLabelValue(viewer, "Snapshot 1", selectedSnapshot1);
+            addLabelValue(viewer, "Snapshot 2", selectedSnapshot2);
+            const diff = document.createElement("pre");
+            diff.textContent = diffData.diff;
+            viewer.appendChild(diff);
+        }
+    } catch (error) {
+        showMessage(byId("snapshotContent"), error.message);
+    }
+}
+
+async function restoreSelectedSnapshot() {
+    if (currentSnapshotId === null) {
+        showMessage(byId("snapshotContent"), "Select a snapshot first");
+        return;
+    }
+    if (!window.confirm("Restore this snapshot and replace the current file?")) {
+        return;
+    }
+    try {
+        await getJSON("/restore/" + encodeURIComponent(currentSnapshotId), {method: "POST"});
+        await refreshDashboard();
+        showMessage(byId("snapshotContent"), "Snapshot restored");
+    } catch (error) {
+        showMessage(byId("snapshotContent"), error.message);
+    }
+}
+
+async function recoverSelectedFile() {
+    if (currentFile === null) {
+        showMessage(byId("fileInfo"), "Select a file first");
+        return;
+    }
+    if (!window.confirm("Recover the latest snapshot for " + currentFile + "?")) {
+        return;
+    }
+    try {
+        await getJSON(fileURL("/recover", currentFile), {method: "POST"});
+        await refreshDashboard();
+        showMessage(byId("fileInfo"), "Latest snapshot recovered for " + currentFile);
+    } catch (error) {
+        showMessage(byId("fileInfo"), error.message);
+    }
+}
+
+async function deleteSelectedSnapshot() {
+    if (currentSnapshotId === null) {
+        showMessage(byId("snapshotContent"), "Select a snapshot first");
+        return;
+    }
+    if (!window.confirm("Delete this snapshot permanently?")) {
+        return;
+    }
+    try {
+        await getJSON("/snapshot/" + encodeURIComponent(currentSnapshotId), {method: "DELETE"});
+        currentSnapshotId = null;
+        selectedSnapshot1 = null;
+        selectedSnapshot2 = null;
+        showMessage(byId("snapshotContent"), "Snapshot deleted");
+        showMessage(byId("diffViewer"), "Select two snapshots...");
+        await refreshDashboard();
+    } catch (error) {
+        showMessage(byId("snapshotContent"), error.message);
+    }
+}
+
+async function refreshDashboard() {
+    try {
+        await Promise.all([loadStats(), loadFiles(), loadSnapshots()]);
+    } catch (error) {
+        showMessage(byId("stats"), error.message);
+    }
+}
+
+byId("refreshButton").addEventListener("click", refreshDashboard);
+byId("snapshotSearch").addEventListener("input", (event) => renderSnapshots(event.target.value));
+byId("restoreButton").addEventListener("click", restoreSelectedSnapshot);
+byId("deleteButton").addEventListener("click", deleteSelectedSnapshot);
+refreshDashboard();
