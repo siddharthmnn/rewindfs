@@ -352,10 +352,8 @@ func TestSnapshotArchiveExportImportRoundTrip(t *testing.T) {
 		{ID: 13, File: "src/main.go", Content: "second version", CreatedAt: time.Date(2026, 10, 20, 11, 0, 0, 0, time.UTC)},
 		{ID: 14, File: "README.md", Content: "same content", CreatedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)},
 	}
-	for _, item := range sourceSnapshots {
-		if _, err := AddSnapshot(&item); err != nil {
-			t.Fatalf("add source snapshot: %v", err)
-		}
+	if _, _, err := snapshotService.CreateMany(sourceSnapshots); err != nil {
+		t.Fatalf("create source snapshot history: %v", err)
 	}
 
 	exportRequest := httptest.NewRequest(http.MethodGet, "/export", nil)
