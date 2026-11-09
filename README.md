@@ -41,11 +41,14 @@ The feature list below describes what is in the repo right now. It is still a le
 - [x] Thread-safe snapshot service and in-memory indexes
 - [x] Explicit SQLite store lifecycle and configurable database path
 - [x] WAL journaling and a bounded SQLite busy timeout
-- [x] Snapshot lookup, listing, deletion, history, and diff endpoints
+- [x] Snapshot lookup, listing, deletion, history, search, and diff endpoints
+- [x] Bounded line-oriented snapshot diffs
+- [x] Paginated snapshot search by workspace-relative file path
 - [x] Workspace-bound snapshot paths and safe restore/recovery
 - [x] Nested file lookups through the `?file=...` query parameter
 - [x] Local-only API binding and same-origin request checks
 - [x] Dashboard renders API data as text instead of injecting it as HTML
+- [x] Dashboard snapshot filtering and latest-file recovery action
 - [x] Unit and API tests with GitHub Actions
 
 ### Still to do
@@ -78,7 +81,7 @@ See [docs/architecture.md](docs/architecture.md) for the runtime flow and packag
 
 ## API
 
-The server listens on `127.0.0.1:8080` by default, so it is only reachable from the local machine. Browser requests with a different origin are rejected too.
+The server listens on `127.0.0.1:8080` by default. It accepts the local `127.0.0.1:8080` and `localhost:8080` hostnames, rejects unexpected Host/Origin values, and limits HTTP request bodies to 16 MiB.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -86,7 +89,7 @@ The server listens on `127.0.0.1:8080` by default, so it is only reachable from 
 | GET | `/stats` | Snapshot, file, and hash counts |
 | GET | `/files` | List tracked files |
 | GET | `/files/exists?file=src/main.go` | Check whether a file has snapshots |
-| GET | `/snapshots` | List all snapshots |
+| GET | `/snapshots` | List all snapshots |\n| GET | `/snapshots/search?q=src/&limit=25&offset=0` | Search and paginate snapshots by file path |
 | GET | `/snapshots/file?file=src/main.go` | List snapshots for a file |
 | GET | `/snapshot/:id` | Get one snapshot |
 | POST | `/snapshot` | Create a snapshot |
@@ -100,7 +103,7 @@ The server listens on `127.0.0.1:8080` by default, so it is only reachable from 
 | POST | `/recover?file=src/main.go` | Recover a file from its latest snapshot |
 | GET | `/diff/:id1/:id2` | Compare two snapshots |
 
-The older single-segment routes are still available. use the query form for nested files.
+The older single-segment routes are still available. use the query form for nested files. Snapshot search returns `items`, `total`, `limit`, and `offset`; search matches file paths, not snapshot contents.
 
 ### Create a snapshot
 
