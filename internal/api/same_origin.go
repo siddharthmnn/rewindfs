@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	snapshotarchive "rewindfs/internal/archive"
 )
 
 const maxRequestBodyBytes = 16 << 20
@@ -42,7 +43,11 @@ func sameOrigin(c *gin.Context) {
 
 func limitRequestBody(c *gin.Context) {
 	if c.Request.Body != nil {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+		limit := int64(maxRequestBodyBytes)
+		if c.Request.URL.Path == "/import" {
+			limit = snapshotarchive.MaxArchiveBytes
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 	}
 	c.Next()
 }

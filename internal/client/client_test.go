@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,5 +86,82 @@ func TestNewRejectsInvalidBaseURL(t *testing.T) {
 		if _, err := New(value, nil); err == nil {
 			t.Errorf("New(%q) succeeded, want error", value)
 		}
+	}
+}
+
+
+func TestGetBytesDownloadsBinaryContent(t *testing.T) {
+	expected := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/export" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(expected)
+	}))
+	defer server.Close()
+
+	api, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := api.GetBytes(context.Background(), "/export")
+	if err != nil {
+		t.Fatalf("GetBytes(): %v", err)
+	}
+	if string(got) != string(expected) {
+		t.Fatalf("downloaded bytes = %v, want %v", got, expected)
+	}
+}
+
+func TestPostBytesUploadsBinaryContent(t *testing.T) {
+	expected := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0xff}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/import" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Content-Type") != "application/zip" {
+			t.Errorf("Content-Type = %q, want application/zip", r.Header.Get("Content-Type"))
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(body) != string(expected) {
+			t.Errorf("uploaded bytes = %v, want %v", body, expected)
+		}
+		_, _ = w.Write([]byte(`{"imported":2,"skipped":1}`))
+	}))
+	defer server.Close()
+
+	api, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Imported int `json:"imported"`
+		Skipped  int `json:"skipped"`
+	}
+	if err := api.PostBytes(context.Background(), "/import", "application/zip", expected, &result); err != nil {
+		t.Fatalf("PostBytes(): %v", err)
+	}
+	if result.Imported != 2 || result.Skipped != 1 {
+		t.Fatalf("import result = %#v", result)
+	}
+}
+
+func TestPostBytesReturnsSafeAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"invalid snapshot archive"}`, http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	api, err := New(server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = api.PostBytes(context.Background(), "/import", "application/zip", []byte("bad"), nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid snapshot archive") {
+		t.Fatalf("PostBytes() error = %v, want safe validation error", err)
 	}
 }
