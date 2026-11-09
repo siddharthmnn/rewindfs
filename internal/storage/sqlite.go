@@ -202,57 +202,76 @@ func (s *Store) database() (*sql.DB, error) {
 	return s.db, nil
 }
 
-// InsertSnapshot stores new file metadata and adds a reference to its shared
-// content blob in one transaction.
+// InsertSnapshot stores one snapshot using the same transaction path as bulk imports.
 func (s *Store) InsertSnapshot(item models.Snapshot) (int, error) {
-	db, err := s.database()
+	ids, err := s.InsertSnapshots([]models.Snapshot{item})
 	if err != nil {
 		return 0, err
 	}
-	if item.Hash == "" {
-		return 0, errors.New("snapshot content hash must not be empty")
+	return ids[0], nil
+}
+
+// InsertSnapshots stores metadata and blob references in a single transaction.
+// If any item fails, none of the batch is committed.
+func (s *Store) InsertSnapshots(items []models.Snapshot) ([]int, error) {
+	if len(items) == 0 {
+		return []int{}, nil
 	}
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
+
 	tx, err := db.Begin()
 	if err != nil {
-		return 0, fmt.Errorf("begin snapshot insert: %w", err)
+		return nil, fmt.Errorf("begin snapshot batch: %w", err)
 	}
 	defer tx.Rollback()
 
-	result, err := tx.Exec(
-		"INSERT INTO content_blobs (hash, content, ref_count) VALUES (?, ?, 1) "+
-			"ON CONFLICT(hash) DO UPDATE SET ref_count = content_blobs.ref_count + 1 "+
-			"WHERE content_blobs.content = excluded.content",
-		item.Hash, item.Content,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("store snapshot content: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("check content blob reference: %w", err)
-	}
-	if affected != 1 {
-		return 0, ErrHashCollision
+	ids := make([]int, 0, len(items))
+	for _, item := range items {
+		if item.Hash == "" {
+			return nil, errors.New("snapshot content hash must not be empty")
+		}
+
+		result, err := tx.Exec(
+			"INSERT INTO content_blobs (hash, content, ref_count) VALUES (?, ?, 1) "+
+				"ON CONFLICT(hash) DO UPDATE SET ref_count = content_blobs.ref_count + 1 "+
+				"WHERE content_blobs.content = excluded.content",
+			item.Hash, item.Content,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store snapshot content: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("check content blob reference: %w", err)
+		}
+		if affected != 1 {
+			return nil, ErrHashCollision
+		}
+
+		result, err = tx.Exec(
+			"INSERT INTO snapshots (file, blob_hash, created_at) VALUES (?, ?, ?)",
+			item.File, item.Hash, item.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("insert snapshot metadata: %w", err)
+		}
+		id, err := result.LastInsertId()
+		if err != nil {
+			return nil, fmt.Errorf("read inserted snapshot ID: %w", err)
+		}
+		if id <= 0 || int64(int(id)) != id {
+			return nil, fmt.Errorf("inserted snapshot ID is out of range: %d", id)
+		}
+		ids = append(ids, int(id))
 	}
 
-	result, err = tx.Exec(
-		"INSERT INTO snapshots (file, blob_hash, created_at) VALUES (?, ?, ?)",
-		item.File, item.Hash, item.CreatedAt,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("insert snapshot metadata: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("read inserted snapshot ID: %w", err)
-	}
-	if id <= 0 || int64(int(id)) != id {
-		return 0, fmt.Errorf("inserted snapshot ID is out of range: %d", id)
-	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit snapshot insert: %w", err)
+		return nil, fmt.Errorf("commit snapshot batch: %w", err)
 	}
-	return int(id), nil
+	return ids, nil
 }
 
 func (s *Store) LoadAllSnapshots() ([]models.Snapshot, error) {
